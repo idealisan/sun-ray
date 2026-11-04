@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -27,11 +28,13 @@ const (
 )
 
 type app struct {
-	cfg   appConfig
-	core  xrayCore
-	win   *mygo.Window
-	tab   int         // selected tab in the main window
-	saver configSaver // debounced persistence to ~/sunray.json
+	cfg      appConfig
+	core     xrayCore
+	win      *mygo.Window
+	tray     *mygo.Tray
+	quitting bool        // a real quit is under way, so closing may proceed
+	tab      int         // selected tab in the main window
+	saver    configSaver // debounced persistence to ~/sunray.json
 
 	logs []string // xray log lines, newest last, capped
 
@@ -369,6 +372,7 @@ func (a *app) openEditor(id string) {
 				a.editorView(c, win, &edit, id)
 			}),
 		})
+		_ = win.SetIcon(appIconPNG)
 	}()
 }
 
@@ -569,9 +573,81 @@ func renderField(c *ui.Context, f fieldSpec, cfg *serverConfig) {
 	}
 }
 
+// showMain brings the main window back from the tray.
+func (a *app) showMain() {
+	if a.win == nil || a.win.IsDestroyed() {
+		return
+	}
+	a.win.Show()
+	a.win.Focus()
+}
+
+// toggleMain shows the main window, or hides it to the tray when it is
+// already visible.
+func (a *app) toggleMain() {
+	if a.win != nil && a.win.IsVisible() {
+		a.win.Hide()
+		return
+	}
+	a.showMain()
+}
+
+// setUpTray adds the menu bar / notification area icon. A right click opens
+// a menu with Show and Quit; a left click shows or hides the main window.
+func (a *app) setUpTray() {
+	icon, template := trayColorPNG, false
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		// macOS tints a template icon to match the menu bar; Windows turns
+		// it white on a dark taskbar.
+		icon, template = trayTemplatePNG, true
+	}
+	tray, err := mygo.NewTray(mygo.TrayOptions{
+		ID:             "sun-ray",
+		Icon:           icon,
+		IconIsTemplate: template,
+		ToolTip:        "Sun Ray",
+	})
+	if err != nil {
+		log.Print("tray: ", err)
+		return
+	}
+	a.tray = tray
+	menu := mygo.NewMenu([]*mygo.MenuItem{
+		{Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) { a.showMain() }},
+		mygo.Separator(),
+		{Role: mygo.RoleQuit},
+	})
+	if runtime.GOOS == "linux" {
+		// AppIndicator only shows menus, so its icon opens this one.
+		tray.SetMenu(menu)
+		return
+	}
+	tray.OnClick(a.toggleMain)
+	tray.OnRightClick(func() {
+		tray.SetMenu(menu)
+		defer tray.SetMenu(nil)
+		tray.PopUpMenu()
+	})
+}
+
 func main() {
 	a := &app{cfg: loadConfig(), cursor: -1}
 	a.saver.remember(a.cfg)
+	mygo.App.SetName("Sun Ray")
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		a.saver.maybeSave(a.cfg, true)
+		_ = a.core.Stop()
+		if a.tray != nil {
+			a.tray.Destroy()
+			a.tray = nil
+		}
+	})
+	mygo.App.OnActivate(func(hasVisibleWindows bool) {
+		if !hasVisibleWindows {
+			a.showMain()
+		}
+	})
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title: "Sun Ray",
@@ -579,6 +655,17 @@ func main() {
 			MinWidth: 720, MinHeight: 520,
 			Content: ui.View(a.view),
 		})
+		_ = a.win.SetIcon(appIconPNG)
+		a.win.OnClose(func(e *mygo.CloseEvent) {
+			// Closing the main window keeps the app in the tray. Without a
+			// tray there would be no way back, so let it close normally.
+			if a.quitting || a.tray == nil {
+				return
+			}
+			e.PreventDefault()
+			a.win.Hide()
+		})
+		a.setUpTray()
 		go a.pollTraffic()
 	})
 	if err := mygo.App.Run(); err != nil {

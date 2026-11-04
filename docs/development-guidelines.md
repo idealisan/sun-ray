@@ -22,6 +22,14 @@ go test ./...
 
 提交前至少跑一遍 `gofmt -w *.go`、`go vet ./...`、`go test ./...`。
 
+macOS 的 `.app` 用 MyGo 的打包命令生成，配置在 `mygo.json`：
+
+```bash
+go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -o dist
+```
+
+图标源文件是 `assets/*.svg`；改动后用 `scripts/render-icons.sh`（macOS `sips`）重新生成 PNG，再打包。
+
 ## 配置持久化
 
 配置保存在 `~/sunray.json`，结构为：

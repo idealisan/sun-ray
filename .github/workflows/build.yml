@@ -59,15 +59,25 @@ jobs:
 
       - name: Build
         run: |
-          NAME=sun-ray-${{ matrix.name }}
-          if [ "$RUNNER_OS" = "Windows" ]; then NAME="$NAME.exe"; fi
-          go build -trimpath -ldflags "-s -w" -o "$NAME" .
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # mygo build makes a signed .app (and a .dmg) with the icon and
+            # Info.plist, so users can double-click it.
+            go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -o dist
+            ditto -c -k --keepParent "dist/darwin-arm64/Sun Ray.app" "dist/sun-ray-darwin-arm64.zip"
+          else
+            NAME=sun-ray-${{ matrix.name }}
+            if [ "$RUNNER_OS" = "Windows" ]; then NAME="$NAME.exe"; fi
+            go build -trimpath -ldflags "-s -w" -o "$NAME" .
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sun-ray-${{ matrix.name }}
-          path: sun-ray-*
+          path: |
+            sun-ray-*
+            dist/sun-ray-darwin-arm64.zip
+            dist/darwin-arm64/*.dmg
           if-no-files-found: error
 
   # On a v* tag push, create a GitHub Release and attach all binaries.

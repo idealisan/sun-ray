@@ -61,6 +61,20 @@ go build -o sun-ray.exe .
 go test ./...
 ```
 
+### macOS 打包
+
+普通用户不应该在终端里启动程序，所以 macOS 用 MyGo 的打包命令生成可双击的 `.app`：
+
+```bash
+go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -o dist
+```
+
+产物在 `dist/darwin-arm64/`：`Sun Ray.app`（以及 `.dmg`）。应用名、Bundle ID、版本和图标在 `mygo.json` 中配置。图标源文件是 `assets/icon.svg` 与 `assets/tray-*.svg`，PNG 由 `scripts/render-icons.sh` 用 `sips` 渲染。
+
+没有配置 Developer ID 时是 ad-hoc 签名，从网上下载后首次打开需要右键 → 打开（或到「系统设置 → 隐私与安全性」里允许）。
+
+Windows 直接双击编译出的 `.exe` 即可；Linux 仍使用普通二进制。
+
 ## 内嵌 geo 资产
 
 路由预设需要 geoip/geosite 数据。本项目把它们（只提取 \`CN\` 与 \`category-ads-all\`，共约 400KB）直接嵌入二进制，并通过 \`filesystem.AssetProvider\` 从内存提供给 xray-core——单文件分发，用户机器零额外文件。
@@ -94,6 +108,7 @@ git push origin v0.1.0
 - 启动 / 停止：直接调用 `core.Instance` 的函数，无子进程
 - 实时流量速率（每秒采样 xray stats 计数器）
 - 运行日志面板（xray 日志经 `log.RegisterHandler` 回调到 GUI）
+- 关闭主窗口后留在菜单栏 / 任务栏托盘，右键菜单可重新打开或退出
 
 ## Roadmap
 
