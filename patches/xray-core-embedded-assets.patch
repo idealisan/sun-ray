@@ -1,8 +1,20 @@
 diff --git a/common/platform/filesystem/file.go b/common/platform/filesystem/file.go
-index 55c0e93..173c5e1 100644
+index 55c0e93..eae8cb0 100644
 --- a/common/platform/filesystem/file.go
 +++ b/common/platform/filesystem/file.go
-@@ -28,6 +28,11 @@ func ReadFile(path string) ([]byte, error) {
+@@ -17,6 +17,11 @@ var NewFileReader FileReaderFunc = func(path string) (io.ReadCloser, error) {
+ 	return os.Open(path)
+ }
+ 
++// AssetProvider, when set, serves asset files from memory (or anywhere else)
++// before the on-disk asset locations are consulted. The bool result reports
++// whether the provider handled the file.
++var AssetProvider func(file string) (io.ReadCloser, int64, bool)
++
+ func ReadFile(path string) ([]byte, error) {
+ 	reader, err := NewFileReader(path)
+ 	if err != nil {
+@@ -28,6 +33,11 @@ func ReadFile(path string) ([]byte, error) {
  }
  
  func OpenAsset(file string) (io.ReadCloser, int64, error) {
