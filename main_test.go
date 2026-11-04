@@ -75,7 +75,7 @@ func TestBuildJSONVLESS(t *testing.T) {
 		`"publicKey": "pbkey123"`,
 		`"shortId": "abcd"`,
 		`"port": 10808`,
-		`"port": 10809`,
+		`"protocol": "mixed"`,
 		`"stats"`,
 		`"geosite:cn"`,
 		`"geosite:category-ads-all"`,
