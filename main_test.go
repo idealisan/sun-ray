@@ -8,12 +8,24 @@ import (
 )
 
 // The view runs headless in tests; clicks behave like user input.
+// Tab 0 (global) is the default.
 func TestView(t *testing.T) {
 	a := &app{cfg: defaultConfig()}
-	tt := ui.NewTester(a.view, 900, 640)
-	for _, want := range []string{"Sun Ray", "入站（本机代理）", "出站（服务器）", "已停止", "启动", "协议", "地址", "路由预设", "传输层", "安全", "日志"} {
+	tt := ui.NewTester(a.view, 880, 620)
+	for _, want := range []string{"Sun Ray", "全局", "服务器", "日志", "入站（本机代理）", "已停止", "启动", "路由预设", "日志级别"} {
 		if !tt.HasText(want) {
 			t.Errorf("view missing text %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+// The server tab shows the protocol spec driven fields.
+func TestViewServerTab(t *testing.T) {
+	a := &app{cfg: defaultConfig(), tab: tabServer}
+	tt := ui.NewTester(a.view, 880, 620)
+	for _, want := range []string{"出站（服务器）", "协议", "地址", "端口", "UUID", "传输层", "安全", "uTLS 指纹"} {
+		if !tt.HasText(want) {
+			t.Errorf("server tab missing text %q; texts: %v", want, tt.Texts())
 		}
 	}
 }

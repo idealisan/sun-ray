@@ -57,6 +57,9 @@ var networks = []string{"tcp", "ws", "grpc", "httpupgrade"}
 var securities = []string{"none", "tls", "reality"}
 var flowOptions = []string{"无", "xtls-rprx-vision"}
 
+// uTLS fingerprints xray-core supports (see transport/internet/tls config).
+var fingerprints = []string{"chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"}
+
 // simpleSettings is the common shape for protocols with no parameters.
 func simpleSettings(protocol string) func(c *guiConfig, port int) (map[string]any, error) {
 	return func(c *guiConfig, port int) (map[string]any, error) {
