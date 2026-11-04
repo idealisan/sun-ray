@@ -37,7 +37,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           go test -v ./... 2>&1 | tee test-output.log
-          exit ${PIPESTATUS[0]}
+          code=${PIPESTATUS[0]}
+          if [ $code -ne 0 ]; then
+            grep -E -- '--- FAIL|^panic:|Error Trace' test-output.log | head -30 | sed 's/^/::error::/'
+          fi
+          exit $code
 
       - name: Upload test log
         if: failure()

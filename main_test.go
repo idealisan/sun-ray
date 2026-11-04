@@ -22,6 +22,7 @@ func TestView(t *testing.T) {
 // The server tab shows the protocol spec driven fields.
 func TestViewServerTab(t *testing.T) {
 	a := &app{cfg: defaultConfig(), tab: tabServer}
+	a.cfg.Security = "tls" // exercise the tls branch fields
 	tt := ui.NewTester(a.view, 880, 620)
 	for _, want := range []string{"出站（服务器）", "协议", "地址", "端口", "UUID", "传输层", "安全", "uTLS 指纹"} {
 		if !tt.HasText(want) {
