@@ -229,12 +229,21 @@ func (a *app) serverTab(c *ui.Context) {
 	})
 }
 
-// logTab: the run log, inline in the main window.
+// logTab: the run log, inline in the main window. The text is selectable
+// (drag, double-click, Ctrl+C) and a button copies everything at once.
 func (a *app) logTab(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Fill().Padding(0, 4, 8).Children(func() {
+	ui.Column(c).Fill().Padding(0, 4, 8).Gap(6).Children(func() {
+		ui.Row(c).Children(func() {
+			ui.Text(c, "选中文本后 Ctrl+C 复制，或").TextColor(t.TextMuted).Grow(1)
+			if ui.Button(c.Key("copylog"), "复制全部日志").Clicked() {
+				if err := mygo.Clipboard.WriteText(strings.Join(a.logs, "\n")); err != nil {
+					log.Print(err)
+				}
+			}
+		})
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted).Selectable()
 		})
 	})
 }
