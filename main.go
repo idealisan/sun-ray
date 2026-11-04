@@ -237,9 +237,7 @@ func (a *app) logTab(c *ui.Context) {
 		ui.Row(c).Children(func() {
 			ui.Text(c, "选中文本后 Ctrl+C 复制，或").TextColor(t.TextMuted).Grow(1)
 			if ui.Button(c.Key("copylog"), "复制全部日志").Clicked() {
-				if err := mygo.Clipboard.WriteText(strings.Join(a.logs, "\n")); err != nil {
-					log.Print(err)
-				}
+				mygo.Clipboard.WriteText(strings.Join(a.logs, "\n"))
 			}
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
