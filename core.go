@@ -8,12 +8,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/core"
@@ -22,8 +25,8 @@ import (
 	_ "github.com/xtls/xray-core/main/distro/all" // register every protocol and feature
 )
 
-// guiConfig is everything the UI edits; protocolSpec binds into it.
-type guiConfig struct {
+// globalConfig is shared by every server: inbound, logging and routing.
+type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
 	Sniffing   bool   `json:"sniffing"`   // sniff connection domains, needed for domain routing
@@ -31,6 +34,12 @@ type guiConfig struct {
 	LogLevel string `json:"logLevel"`
 	RouteCN  bool   `json:"routeCN"`  // direct traffic to mainland China sites/IPs
 	RouteAds bool   `json:"routeAds"` // block ad domains
+}
+
+// serverConfig is one entry of the server list; protocolSpec binds into it.
+type serverConfig struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 
 	Protocol string `json:"protocol"` // key into protocolRegistry
 	Address  string `json:"address"`  // server address
@@ -67,25 +76,61 @@ type guiConfig struct {
 	SpiderX       string `json:"spiderX"`   // reality
 }
 
-func defaultConfig() guiConfig {
-	return guiConfig{
-		ListenPort: "10808", Sniffing: true,
-		LogLevel: "info",
-		Protocol: "vless", Port: "443", Method: "aes-256-gcm",
+// appConfig is the whole persisted state: global settings plus the server
+// list and the id of the server in use.
+type appConfig struct {
+	Global   globalConfig   `json:"global"`
+	Servers  []serverConfig `json:"servers"`
+	ActiveID string         `json:"activeId"`
+}
+
+func defaultGlobalConfig() globalConfig {
+	return globalConfig{ListenPort: "10808", Sniffing: true, LogLevel: "info"}
+}
+
+func defaultServerConfig() serverConfig {
+	return serverConfig{
+		ID: newServerID(), Protocol: "vless", Port: "443", Method: "aes-256-gcm",
 		VMessSecurity: "auto",
 		Network:       "tcp", Security: "none", Fingerprint: "chrome", SpiderX: "/",
 	}
 }
 
-// buildJSON renders the GUI fields into a full xray JSON config, with stats
-// and policy enabled so the UI can read traffic counters.
-func (c *guiConfig) buildJSON() ([]byte, error) {
-	listenPort, err := strconv.Atoi(c.ListenPort)
+func defaultAppConfig() appConfig {
+	s := defaultServerConfig()
+	return appConfig{Global: defaultGlobalConfig(), Servers: []serverConfig{s}, ActiveID: s.ID}
+}
+
+// newServerID returns a random id, stable across renames and reorders.
+func newServerID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// displayName is the label the server list shows for this entry.
+func (s *serverConfig) displayName() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	if s.Address != "" {
+		return s.Protocol + " · " + s.Address
+	}
+	return "未命名 " + s.Protocol
+}
+
+// buildJSON renders the server fields and the shared global settings into a
+// full xray JSON config, with stats and policy enabled so the UI can read
+// traffic counters.
+func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
+	listenPort, err := strconv.Atoi(g.ListenPort)
 	if err != nil || listenPort < 1 || listenPort > 65535 {
-		return nil, fmt.Errorf("监听端口无效: %q", c.ListenPort)
+		return nil, fmt.Errorf("监听端口无效: %q", g.ListenPort)
 	}
 	listen := "127.0.0.1"
-	if c.AllowLAN {
+	if g.AllowLAN {
 		listen = "0.0.0.0"
 	}
 
@@ -103,11 +148,11 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 		}, "outboundTag": "direct"},
 	}
 	outbounds := []any{proxy, map[string]any{"protocol": "freedom", "tag": "direct"}}
-	if c.RouteAds {
+	if g.RouteAds {
 		rules = append(rules, map[string]any{"type": "field", "domain": []string{"geosite:category-ads-all"}, "outboundTag": "block"})
 		outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": "block"})
 	}
-	if c.RouteCN {
+	if g.RouteCN {
 		rules = append(rules,
 			map[string]any{"type": "field", "domain": []string{"geosite:cn"}, "outboundTag": "direct"},
 			map[string]any{"type": "field", "ip": []string{"geoip:cn"}, "outboundTag": "direct"},
@@ -115,12 +160,12 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 	}
 
 	sniffing := map[string]any{"enabled": false, "destOverride": []string{"http", "tls"}}
-	if c.Sniffing {
+	if g.Sniffing {
 		sniffing["enabled"] = true
 	}
 
 	cfg := map[string]any{
-		"log":       map[string]any{"loglevel": c.LogLevel},
+		"log":       map[string]any{"loglevel": g.LogLevel},
 		"routing":   map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 		"outbounds": outbounds,
 		"stats":     map[string]any{},

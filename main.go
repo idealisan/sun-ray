@@ -3,11 +3,13 @@ package main
 // Sun Ray: a simple Xray GUI client in native UI. The xray-core library
 // runs inside this very process (see core.go + protocols.go); the window
 // below is drawn by mygo itself, with no webview. The UI is tabbed:
-// global settings, server settings and the run log live on separate tabs.
+// global settings, the server list and the run log live on separate tabs.
+// Each server in the list opens its own editor window, reusing serverForm.
 
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,7 +27,7 @@ const (
 )
 
 type app struct {
-	cfg   guiConfig
+	cfg   appConfig
 	core  xrayCore
 	win   *mygo.Window
 	tab   int         // selected tab in the main window
@@ -34,6 +36,13 @@ type app struct {
 	logs []string // xray log lines, newest last, capped
 
 	upSpeed, downSpeed string // per-second rates shown in the header
+
+	// Server list state.
+	list     ui.ListState
+	chosen   ui.Selection[string] // selected server ids, for batch actions
+	cursor   int                  // row the keyboard acts on, -1 for none
+	sort     ui.SortOrder
+	lastSort ui.SortOrder
 }
 
 func (a *app) addLog(line string) {
@@ -45,11 +54,16 @@ func (a *app) addLog(line string) {
 	})
 }
 
-// start validates the fields, builds the config and boots the in-process
-// core, all through function calls.
+// start validates the active server, builds the config and boots the
+// in-process core, all through function calls.
 func (a *app) start() {
 	a.saver.maybeSave(a.cfg, true)
-	cfgJSON, err := a.cfg.buildJSON()
+	s := a.activeServer()
+	if s == nil {
+		a.addLog("[sun-ray] 没有可用的服务器")
+		return
+	}
+	cfgJSON, err := s.buildJSON(&a.cfg.Global)
 	if err != nil {
 		a.addLog("[sun-ray] " + err.Error())
 		return
@@ -105,9 +119,14 @@ func (a *app) view(c *ui.Context) {
 	a.saver.maybeSave(a.cfg, false)
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
-		// Header: title, live speeds, status, start/stop.
+		// Header: title, active server, live speeds, status, start/stop.
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Sun Ray").FontSize(18).Bold().Grow(1)
+			ui.Text(c, "Sun Ray").FontSize(18).Bold()
+			if s := a.activeServer(); s != nil {
+				ui.Text(c, "当前："+s.displayName()).TextColor(t.TextMuted).Grow(1)
+			} else {
+				ui.Text(c, "未选择服务器").TextColor(t.TextMuted).Grow(1)
+			}
 			if running {
 				ui.Textf(c, "↑ %s  ↓ %s", a.upSpeed, a.downSpeed).TextColor(t.TextMuted)
 				ui.Text(c, "运行中").Bold().TextColor(t.Accent)
@@ -122,12 +141,12 @@ func (a *app) view(c *ui.Context) {
 			}
 		})
 
-		ui.Tabs(c, &a.tab, "全局", "服务器", "日志")
+		ui.Tabs(c, &a.tab, "全局", "服务器列表", "日志")
 		switch a.tab {
 		case tabGlobal:
 			a.globalTab(c)
 		case tabServer:
-			a.serverTab(c)
+			a.serverListTab(c)
 		case tabLog:
 			a.logTab(c)
 		}
@@ -136,32 +155,110 @@ func (a *app) view(c *ui.Context) {
 
 // globalTab: inbound ports, sniffing, log level and routing presets.
 func (a *app) globalTab(c *ui.Context) {
-	cfg := &a.cfg
+	g := &a.cfg.Global
 	ui.Row(c).Fill().Gap(24).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "入站（本机代理）").Bold()
 			ui.Field(c, "监听端口（SOCKS 与 HTTP 共用）", func() {
-				ui.TextInput(c, &cfg.ListenPort).Placeholder("10808")
+				ui.TextInput(c, &g.ListenPort).Placeholder("10808")
 			})
-			ui.Checkbox(c, &cfg.AllowLAN, "允许局域网连接")
-			ui.Checkbox(c, &cfg.Sniffing, "流量嗅探（域名分流需要）")
+			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
+			ui.Checkbox(c, &g.Sniffing, "流量嗅探（域名分流需要）")
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "日志").Bold()
-			renderField(c, logLevelField, cfg)
+			renderChoice(c, "日志级别", &g.LogLevel, logLevels)
 
 			ui.Text(c, "路由预设").Bold()
-			ui.Checkbox(c, &cfg.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
-			ui.Checkbox(c, &cfg.RouteAds, "屏蔽广告（geosite:category-ads-all）")
+			ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
+			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
 		})
 	})
 }
 
-// serverTab: the active protocol spec drives which fields appear.
-func (a *app) serverTab(c *ui.Context) {
-	cfg := &a.cfg
+// serverListTab: the list of servers. A double click edits a server in its
+// own window; Enter makes the chosen server active.
+func (a *app) serverListTab(c *ui.Context) {
+	t := c.Theme()
+	a.applySort()
+	a.list.Key = func(row int) any { return a.cfg.Servers[row].ID }
+	a.list.Selection = &a.chosen
+	a.list.Selected = &a.cursor
+	a.list.Sort = &a.sort
+
 	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
-		ui.Text(c, "出站（服务器）").Bold()
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("srvadd"), "新增").Clicked() {
+				a.addServer()
+			}
+			if ui.Button(c.Key("srvedit"), "编辑").Clicked() {
+				if id, ok := a.cursorServerID(); ok {
+					a.openEditor(id)
+				}
+			}
+			if ui.Button(c.Key("srvdup"), "复制").Clicked() {
+				a.duplicateSelected()
+			}
+			if ui.Button(c.Key("srvdelsel"), "删除").Clicked() {
+				a.deleteSelected()
+			}
+			if ui.Button(c.Key("srvuse"), "设为当前").Clicked() {
+				if id, ok := a.cursorServerID(); ok {
+					a.setActive(id)
+				}
+			}
+			ui.Text(c, fmt.Sprintf("共 %d 个", len(a.cfg.Servers))).TextColor(t.TextMuted).Grow(1)
+		})
+
+		cols := []ui.TableColumn{
+			{Title: "名称", ID: "name", Sortable: true},
+			{Title: "协议", ID: "protocol", Width: 100, Sortable: true},
+			{Title: "地址", ID: "address", Sortable: true},
+			{Title: "端口", ID: "port", Width: 80, Align: ui.End, Sortable: true},
+			{Title: "当前", ID: "active", Width: 60, Align: ui.Center},
+		}
+		dbl := -1
+		tbl := ui.Table(c, &a.list, cols, len(a.cfg.Servers), func(row, col int) {
+			s := &a.cfg.Servers[row]
+			cell := ui.Box(c).FillWidth().Children(func() {
+				switch col {
+				case 0:
+					ui.Text(c, s.displayName()).SingleLine()
+				case 1:
+					ui.Text(c, s.Protocol)
+				case 2:
+					ui.Text(c, s.Address).SingleLine()
+				case 3:
+					ui.Text(c, s.Port)
+				case 4:
+					if s.ID == a.cfg.ActiveID {
+						ui.Text(c, "●").TextColor(t.Accent)
+					}
+				}
+			})
+			if cell.RowDoubleClicked() {
+				dbl = row
+			}
+		}).Grow(1)
+
+		switch {
+		case dbl >= 0:
+			a.cursor = dbl
+			a.openEditor(a.cfg.Servers[dbl].ID)
+		case tbl.Submitted():
+			if id, ok := a.cursorServerID(); ok {
+				a.setActive(id)
+			}
+		}
+	})
+}
+
+// serverForm: the protocol form, shared by the editor windows.
+func (a *app) serverForm(c *ui.Context, cfg *serverConfig) {
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Field(c, "名称（可选）", func() {
+			ui.TextInput(c, &cfg.Name).Placeholder("例如 日本节点")
+		})
 		ui.Field(c, "协议", func() {
 			ui.Select(c, &cfg.Protocol, protocolList)
 		})
@@ -229,6 +326,196 @@ func (a *app) serverTab(c *ui.Context) {
 	})
 }
 
+// editorView is the content of one server's editor window: the protocol
+// form plus Save and Cancel, nothing else.
+func (a *app) editorView(c *ui.Context, win *mygo.Window, s *serverConfig, id string) {
+	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
+		ui.Text(c, "服务器设置").FontSize(16).Bold()
+		ui.Scroll(c).Grow(1).Children(func() {
+			a.serverForm(c, s)
+		})
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.PrimaryButton(c.Key("editorsave"), "保存").Clicked() {
+				a.updateServer(id, *s)
+				a.saver.maybeSave(a.cfg, true)
+				win.Close()
+			}
+			if ui.Button(c.Key("editorcancel"), "取消").Clicked() {
+				win.Close()
+			}
+		})
+	})
+}
+
+// openEditor opens a separate, non-modal window for one server. Several
+// editors may be open at once.
+func (a *app) openEditor(id string) {
+	s, ok := a.serverByID(id)
+	if !ok {
+		return
+	}
+	edit := *s
+	title := "编辑服务器 · " + edit.displayName()
+	// Create the window from another goroutine so it happens after this
+	// build pass, not in the middle of it.
+	go func() {
+		var win *mygo.Window
+		win = mygo.NewWindow(mygo.WindowOptions{
+			Title:    title,
+			Width:    720,
+			Height:   640,
+			MinWidth: 600, MinHeight: 480,
+			Content: ui.View(func(c *ui.Context) {
+				a.editorView(c, win, &edit, id)
+			}),
+		})
+	}()
+}
+
+func (a *app) serverByID(id string) (*serverConfig, bool) {
+	for i := range a.cfg.Servers {
+		if a.cfg.Servers[i].ID == id {
+			return &a.cfg.Servers[i], true
+		}
+	}
+	return nil, false
+}
+
+func (a *app) activeServer() *serverConfig {
+	if s, ok := a.serverByID(a.cfg.ActiveID); ok {
+		return s
+	}
+	if len(a.cfg.Servers) > 0 {
+		return &a.cfg.Servers[0]
+	}
+	return nil
+}
+
+func (a *app) setActive(id string) {
+	if _, ok := a.serverByID(id); !ok {
+		return
+	}
+	a.cfg.ActiveID = id
+}
+
+// cursorServerID is the server the keyboard acts on: the cursor row, or the
+// first chosen one.
+func (a *app) cursorServerID() (string, bool) {
+	if a.cursor >= 0 && a.cursor < len(a.cfg.Servers) {
+		return a.cfg.Servers[a.cursor].ID, true
+	}
+	for id := range a.chosen.All() {
+		return id, true
+	}
+	return "", false
+}
+
+func (a *app) selectedIDs() []string {
+	ids := make([]string, 0, a.chosen.Len())
+	for id := range a.chosen.All() {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (a *app) addServer() {
+	s := defaultServerConfig()
+	s.Name = "新服务器"
+	a.cfg.Servers = append(a.cfg.Servers, s)
+	if a.cfg.ActiveID == "" {
+		a.cfg.ActiveID = s.ID
+	}
+}
+
+func (a *app) duplicateSelected() {
+	ids := a.selectedIDs()
+	if len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		s, ok := a.serverByID(id)
+		if !ok {
+			continue
+		}
+		cp := *s
+		cp.ID = newServerID()
+		if cp.Name != "" {
+			cp.Name += " 副本"
+		}
+		a.cfg.Servers = append(a.cfg.Servers, cp)
+	}
+}
+
+func (a *app) deleteSelected() {
+	ids := make(map[string]bool, a.chosen.Len())
+	for id := range a.chosen.All() {
+		ids[id] = true
+	}
+	if len(ids) == 0 {
+		return
+	}
+	kept := a.cfg.Servers[:0]
+	for _, s := range a.cfg.Servers {
+		if !ids[s.ID] {
+			kept = append(kept, s)
+		}
+	}
+	a.cfg.Servers = kept
+	a.chosen.Clear()
+	a.cursor = -1
+	if ids[a.cfg.ActiveID] {
+		if len(a.cfg.Servers) > 0 {
+			a.cfg.ActiveID = a.cfg.Servers[0].ID
+		} else {
+			s := defaultServerConfig()
+			a.cfg.Servers = []serverConfig{s}
+			a.cfg.ActiveID = s.ID
+		}
+	}
+}
+
+func (a *app) updateServer(id string, s serverConfig) {
+	for i := range a.cfg.Servers {
+		if a.cfg.Servers[i].ID == id {
+			s.ID = id
+			a.cfg.Servers[i] = s
+			return
+		}
+	}
+}
+
+// applySort reorders the list in place when the user clicks a sortable
+// column header.
+func (a *app) applySort() {
+	if a.sort == a.lastSort {
+		return
+	}
+	a.lastSort = a.sort
+	if a.sort.Column == "" {
+		return
+	}
+	sort.SliceStable(a.cfg.Servers, func(i, j int) bool {
+		x, y := a.cfg.Servers[i], a.cfg.Servers[j]
+		var xi, yi string
+		switch a.sort.Column {
+		case "name":
+			xi, yi = x.displayName(), y.displayName()
+		case "protocol":
+			xi, yi = x.Protocol, y.Protocol
+		case "address":
+			xi, yi = x.Address, y.Address
+		case "port":
+			xi, yi = x.Port, y.Port
+		default:
+			return false
+		}
+		if a.sort.Descending {
+			return xi > yi
+		}
+		return xi < yi
+	})
+}
+
 // logTab: the run log, inline in the main window. The text is selectable
 // (drag, double-click, Ctrl+C) and a button copies everything at once.
 func (a *app) logTab(c *ui.Context) {
@@ -248,31 +535,33 @@ func (a *app) logTab(c *ui.Context) {
 
 // Shared field specs for settings that appear outside protocol fields.
 var (
-	logLevelField     = selectField("日志级别", func(c *guiConfig) *string { return &c.LogLevel }, logLevels)
-	networkField      = selectField("传输", func(c *guiConfig) *string { return &c.Network }, networks)
-	securityField     = selectField("方式", func(c *guiConfig) *string { return &c.Security }, securities)
-	securityQuicField = selectField("方式", func(c *guiConfig) *string { return &c.Security }, quicSecurities)
-	fingerprintField  = selectField("uTLS 指纹", func(c *guiConfig) *string { return &c.Fingerprint }, fingerprints)
+	networkField      = selectField("传输", func(c *serverConfig) *string { return &c.Network }, networks)
+	securityField     = selectField("方式", func(c *serverConfig) *string { return &c.Security }, securities)
+	securityQuicField = selectField("方式", func(c *serverConfig) *string { return &c.Security }, quicSecurities)
+	fingerprintField  = selectField("uTLS 指纹", func(c *serverConfig) *string { return &c.Fingerprint }, fingerprints)
 )
 
-// renderField draws one fieldSpec: radio group for up to four options,
-// dropdown for more, checkbox for bools, text input otherwise.
-func renderField(c *ui.Context, f fieldSpec, cfg *guiConfig) {
+// renderChoice draws a labeled choice: radio buttons for up to four options,
+// a dropdown for five or more. See docs/design-guidelines.md.
+func renderChoice(c *ui.Context, label string, selected *string, options []string) {
+	ui.Field(c, label, func() {
+		if len(options) <= 4 {
+			ui.RadioGroup(c, func() {
+				for _, opt := range options {
+					ui.Radio(c, selected, opt, opt)
+				}
+			}).Row().Gap(14).Wrap()
+			return
+		}
+		ui.Select(c, selected, options)
+	})
+}
+
+// renderField draws one fieldSpec: a choice, a checkbox or a text input.
+func renderField(c *ui.Context, f fieldSpec, cfg *serverConfig) {
 	switch {
 	case f.options != nil:
-		if len(f.options) <= 4 {
-			ui.Field(c, f.label, func() {
-				ui.RadioGroup(c, func() {
-					ui.Row(c).Gap(14).Children(func() {
-						for _, opt := range f.options {
-							ui.Radio(c, f.bindString(cfg), opt, opt)
-						}
-					})
-				})
-			})
-		} else {
-			ui.Field(c, f.label, func() { ui.Select(c, f.bindString(cfg), f.options) })
-		}
+		renderChoice(c, f.label, f.bindString(cfg), f.options)
 	case f.bindBool != nil:
 		ui.Checkbox(c, f.bindBool(cfg), f.label)
 	default:
@@ -281,7 +570,8 @@ func renderField(c *ui.Context, f fieldSpec, cfg *guiConfig) {
 }
 
 func main() {
-	a := &app{cfg: loadConfig()}
+	a := &app{cfg: loadConfig(), cursor: -1}
+	a.saver.remember(a.cfg)
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title: "Sun Ray",

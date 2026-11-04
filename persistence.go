@@ -23,21 +23,28 @@ func configPath() string {
 }
 
 // loadConfig reads the saved config; missing or broken files fall back to
-// the defaults so the app always starts.
-func loadConfig() guiConfig {
-	cfg := defaultConfig()
+// the defaults so the app always starts. Only the current format is read:
+// there is no migration from older, single-server files.
+func loadConfig() appConfig {
+	cfg := defaultAppConfig()
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		return cfg
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return defaultConfig()
+	var saved appConfig
+	if err := json.Unmarshal(data, &saved); err != nil || len(saved.Servers) == 0 {
+		return cfg
 	}
-	return cfg
+	for i := range saved.Servers {
+		if saved.Servers[i].ID == "" {
+			saved.Servers[i].ID = newServerID()
+		}
+	}
+	return saved
 }
 
 // saveConfig writes the config atomically (temp file + rename).
-func saveConfig(cfg guiConfig) error {
+func saveConfig(cfg appConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -56,9 +63,17 @@ type configSaver struct {
 	lastSave time.Time
 }
 
+// remember records cfg as already persisted, so the first frame does not
+// rewrite a file that was just loaded.
+func (s *configSaver) remember(cfg appConfig) {
+	if data, err := json.Marshal(cfg); err == nil {
+		s.lastJSON = string(data)
+	}
+}
+
 // maybeSave persists the config when it changed, at most once per debounce
 // interval. Runs on the UI thread (called from view and start/stop).
-func (s *configSaver) maybeSave(cfg guiConfig, force bool) {
+func (s *configSaver) maybeSave(cfg appConfig, force bool) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return
