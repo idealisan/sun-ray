@@ -1,65 +1,95 @@
-# printed-ray
+# Sun Ray
 
-一个基于 [Xray-core](https://github.com/xtls/xray-core) 的跨平台 GUI 客户端，使用 [MyGo](https://github.com/egoist/mygo) 作为桌面应用框架。
+一个简单的 [Xray-core](https://github.com/xtls/xray-core) GUI 客户端，使用 [MyGo](https://github.com/egoist/mygo) 的原生 UI（Native UI）绘制界面。
 
-## 项目目标
+**单进程架构**：Xray-core 以 Go 库的形式直接嵌入 GUI 程序，两者编译为同一个二进制，通过函数调用通信 —— 不经过命令行、不起子进程。
 
-把 Xray-core（代理内核）与 MyGo（GUI 壳）组合起来，做一个轻量、单二进制、低内存占用的 Xray 图形客户端。
+## 架构
 
-## 技术选型
+```
+┌─────────────────── 单一进程 / 单一二进制 ───────────────────┐
+│                                                            │
+│  GUI（mygo 原生 UI）        xray-core（库，本进程内）        │
+│  ┌──────────────────┐      ┌───────────────────────────┐   │
+│  │ 配置表单          │──┐   │ core.New(config)          │   │
+│  │ 启动 / 停止按钮    │  ├──►│ instance.Start()/Close()  │   │
+│  │ 流量速率显示       │  │   │ SOCKS/HTTP 入站 + 出站     │   │
+│  │ 日志面板          │◄─┘   │                           │   │
+│  └──────────────────┘      └───────────────────────────┘   │
+│        ▲ 函数调用通信（无命令行、无子进程）                    │
+│        ├── 启动/停止：core.Instance 的方法调用               │
+│        ├── 日志：log.RegisterHandler 回调进 GUI             │
+│        └── 流量：stats.Manager 计数器每秒采样               │
+└────────────────────────────────────────────────────────────┘
+```
+
+关键依赖关系：
 
 | 组件 | 说明 |
 | --- | --- |
-| [MyGo](https://github.com/egoist/mygo) | 桌面应用框架：纯 Go、无 cgo，支持 WebView 前端（WebView2/WebKitGTK/WKWebView）或 Go 原生 UI，前后端通过类型化 IPC 通信 |
-| [Xray-core](https://github.com/xtls/xray-core) | 代理内核，以子进程方式启动，通过配置文件与本地 API 控制 |
-
-架构思路：GUI 进程负责界面与配置管理，Xray-core 作为独立子进程运行，GUI 生成配置文件、启动/停止/监控内核进程，并通过 Xray 的 gRPC API 观测流量。
+| [MyGo](https://github.com/egoist/mygo) | 桌面应用框架：纯 Go、无 cgo，原生 GPU 绘制 UI，无 WebView、无 HTML/JS |
+| [Xray-core](https://github.com/xtls/xray-core) | 以 Go 库嵌入（`core.New`），通过 `_ "main/distro/all"` 注册全部协议 |
 
 ## 仓库结构
 
-本仓库通过 git submodule 引用两个上游项目：
+两个上游项目以 git submodule 引入，本仓库的应用代码通过 Go `replace` 指令直接引用本地子模块：
 
 ```
-printed-ray/
-├── mygo/        # MyGo 框架（子模块）
-├── xray-core/   # Xray 内核（子模块）
-└── (后续在此添加应用代码)
+sun-ray/
+├── main.go       # GUI：mygo 原生 UI（窗口、表单、按钮、日志）
+├── core.go       # xray-core 进程内封装：配置生成、启停、日志、流量
+├── main_test.go  # headless UI 测试 + 内核启停冒烟测试
+├── go.mod        # replace ./mygo、./xray-core
+├── mygo/         # 子模块
+└── xray-core/    # 子模块
 ```
 
-> 子模块默认是浅克隆（depth 1）。上游更新后，进入子模块目录 `git fetch --unshallow` 可获取完整历史。
+## 开发
 
-## 快速开始
-
-克隆本仓库（含子模块）：
+要求：Go 1.27+（旧版本会自动下载工具链）。
 
 ```bash
 git clone --recurse-submodules <本仓库地址>
-cd printed-ray
+cd sun-ray
 # 若已克隆过：
 git submodule update --init --recursive
+
+# 构建单二进制（GUI + 内核一体）
+go build -o sun-ray.exe .
+
+# 运行测试（headless 渲染，无需窗口）
+go test ./...
 ```
 
-构建 Xray-core（需要 Go 1.24+）：
+## CI 与发布
+
+GitHub Actions（`.github/workflows/build.yml`）：
+
+- push 到 master / PR：三平台（Linux amd64 / Windows amd64 / macOS arm64）编译 + Linux 上跑测试，产物存为 workflow artifact
+- 推送 `v*` 标签：三平台编译后自动创建 GitHub Release，并把二进制挂到 Release 资产上
+
+发布新版：
 
 ```bash
-cd xray-core
-go build -o xray ./main
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-开发环境要求：
+## 当前功能
 
-- Go 1.24+
-- Node.js / Bun（若前端走 WebView 方案）
-- 平台依赖：Windows 使用 WebView2（系统自带）；Linux 需要 WebKitGTK 开发库
+- 入站：本机 SOCKS5 + HTTP 代理，端口可配，可允许局域网
+- 出站协议：vless / vmess / trojan / shadowsocks / freedom，可配 TLS 与 SNI
+- 启动 / 停止：直接调用 `core.Instance` 的函数，无子进程
+- 实时流量速率（每秒采样 xray stats 计数器）
+- 运行日志面板（xray 日志经 `log.RegisterHandler` 回调到 GUI）
 
 ## Roadmap
 
-- [ ] 搭建 MyGo 应用骨架
-- [ ] 集成 Xray-core 子进程管理（启动 / 停止 / 崩溃重启）
-- [ ] 配置文件生成（入站 / 出站 / 路由规则）
-- [ ] 节点管理与订阅导入
-- [ ] 流量统计（Xray gRPC API）
-- [ ] 系统代理设置（各平台）
+- [ ] 配置持久化（保存/加载服务器列表）
+- [ ] 订阅导入
+- [ ] 路由规则编辑（分流、黑白名单）
+- [ ] 系统代理一键设置（各平台）
+- [ ] 更多传输层：WebSocket / gRPC / REALITY
 - [ ] 多平台打包分发
 
 ## License
