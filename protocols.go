@@ -6,7 +6,9 @@ package main
 // the UI and the config builder stay untouched.
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
