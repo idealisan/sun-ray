@@ -18,7 +18,7 @@ type fieldSpec struct {
 	placeholder string
 	bindString  func(c *guiConfig) *string
 	bindBool    func(c *guiConfig) *bool
-	options     []string // non-nil renders a select
+	options     []string // non-nil renders a select/radios
 }
 
 func textField(label, placeholder string, bind func(c *guiConfig) *string) fieldSpec {
@@ -41,6 +41,7 @@ type protocolSpec struct {
 	needsSecret bool
 	secretLabel string
 	stream      bool // transport + security (streamSettings) apply
+	tlsOnly     bool // QUIC-based: security (TLS) applies, transport does not
 	fields      []fieldSpec
 	build       func(c *guiConfig, port int) (map[string]any, error)
 }
@@ -55,16 +56,39 @@ var protocolList = []string{
 var logLevels = []string{"debug", "info", "warning", "error"}
 var networks = []string{"tcp", "ws", "grpc", "httpupgrade"}
 var securities = []string{"none", "tls", "reality"}
+var quicSecurities = []string{"none", "tls"}
 var flowOptions = []string{"无", "xtls-rprx-vision"}
+var vmessSecurities = []string{"auto", "aes-128-gcm", "chacha20-poly1305", "none", "zero"}
+var domainStrategies = []string{"AsIs", "UseIP", "UseIPv4", "UseIPv6"}
 
 // uTLS fingerprints xray-core supports (see transport/internet/tls config).
 var fingerprints = []string{"chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"}
 
-// simpleSettings is the common shape for protocols with no parameters.
-func simpleSettings(protocol string) func(c *guiConfig, port int) (map[string]any, error) {
-	return func(c *guiConfig, port int) (map[string]any, error) {
-		return map[string]any{}, nil
+// needsAddress reports whether the protocol connects to a remote server.
+func needsAddress(p string) bool {
+	switch p {
+	case "freedom", "blackhole", "dns", "loopback":
+		return false
 	}
+	return true
+}
+
+// needsSecret reports whether the protocol takes a UUID / password / key.
+func needsSecret(p string) bool {
+	switch p {
+	case "vless", "vmess", "trojan", "shadowsocks", "hysteria", "masque":
+		return true
+	}
+	return false
+}
+
+// streamCapable reports whether streamSettings (transport + security) apply.
+func streamCapable(p string) bool {
+	switch p {
+	case "vless", "vmess", "trojan", "shadowsocks":
+		return true
+	}
+	return false
 }
 
 var protocolRegistry = map[string]protocolSpec{
@@ -72,9 +96,14 @@ var protocolRegistry = map[string]protocolSpec{
 		name: "vless", needsAddr: true, needsSecret: true, secretLabel: "UUID", stream: true,
 		fields: []fieldSpec{
 			selectField("Flow", func(c *guiConfig) *string { return &c.Flow }, flowOptions),
+			textField("加密（留空为 none）", "none", func(c *guiConfig) *string { return &c.VlessEncrypt }),
 		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
-			user := map[string]any{"id": c.Secret, "encryption": "none", "level": 8}
+			enc := c.VlessEncrypt
+			if enc == "" {
+				enc = "none"
+			}
+			user := map[string]any{"id": c.Secret, "encryption": enc, "level": 8}
 			if c.Flow == "xtls-rprx-vision" {
 				user["flow"] = c.Flow
 			}
@@ -85,10 +114,17 @@ var protocolRegistry = map[string]protocolSpec{
 	},
 	"vmess": {
 		name: "vmess", needsAddr: true, needsSecret: true, secretLabel: "UUID", stream: true,
+		fields: []fieldSpec{
+			selectField("加密方式", func(c *guiConfig) *string { return &c.VMessSecurity }, vmessSecurities),
+		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
+			sec := c.VMessSecurity
+			if sec == "" {
+				sec = "auto"
+			}
 			return map[string]any{"vnext": []any{map[string]any{
 				"address": c.Address, "port": port,
-				"users": []any{map[string]any{"id": c.Secret, "security": "auto", "alterId": 0, "level": 8}},
+				"users": []any{map[string]any{"id": c.Secret, "security": sec, "alterId": 0, "level": 8}},
 			}}}, nil
 		},
 	},
@@ -113,7 +149,7 @@ var protocolRegistry = map[string]protocolSpec{
 		},
 	},
 	"socks": {
-		name: "socks", needsAddr: true, stream: true,
+		name: "socks", needsAddr: true,
 		fields: []fieldSpec{
 			textField("用户名（可选）", "", func(c *guiConfig) *string { return &c.User }),
 			textField("密码（可选）", "", func(c *guiConfig) *string { return &c.Pass }),
@@ -127,7 +163,7 @@ var protocolRegistry = map[string]protocolSpec{
 		},
 	},
 	"http": {
-		name: "http", needsAddr: true, stream: true,
+		name: "http", needsAddr: true,
 		fields: []fieldSpec{
 			textField("用户名（可选）", "", func(c *guiConfig) *string { return &c.User }),
 			textField("密码（可选）", "", func(c *guiConfig) *string { return &c.Pass }),
@@ -142,31 +178,54 @@ var protocolRegistry = map[string]protocolSpec{
 	},
 }
 
-// UDP-native or special protocols: no streamSettings.
+// UDP-native or special protocols; registered in init to keep the map literal flat.
 func init() {
 	protocolRegistry["wireguard"] = protocolSpec{
 		name: "wireguard", needsAddr: true, needsSecret: true, secretLabel: "本机私钥",
 		fields: []fieldSpec{
 			textField("对端公钥", "", func(c *guiConfig) *string { return &c.PeerKey }),
+			textField("预共享密钥（可选）", "", func(c *guiConfig) *string { return &c.WGPreSharedKey }),
+			textField("本机地址（逗号分隔）", "172.16.0.2/32", func(c *guiConfig) *string { return &c.WGLocalAddr }),
+			textField("KeepAlive 秒（可选）", "0", func(c *guiConfig) *string { return &c.WGKeepAlive }),
+			textField("MTU", "1420", func(c *guiConfig) *string { return &c.WGMTU }),
 		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
 			if strings.TrimSpace(c.PeerKey) == "" {
-				return nil, fmt.Errorf("WireGuard 对端公钥不能为空")
+				return nil, errors.New("WireGuard 对端公钥不能为空")
+			}
+			local := c.WGLocalAddr
+			if local == "" {
+				local = "172.16.0.2/32"
+			}
+			peer := map[string]any{
+				"publicKey": c.PeerKey,
+				"endpoint":  fmt.Sprintf("%s:%d", c.Address, port),
+			}
+			if c.WGPreSharedKey != "" {
+				peer["preSharedKey"] = c.WGPreSharedKey
+			}
+			if c.WGKeepAlive != "" {
+				if ka, err := strconv.Atoi(c.WGKeepAlive); err == nil && ka > 0 {
+					peer["keepAlive"] = ka
+				}
+			}
+			mtu := 1420
+			if c.WGMTU != "" {
+				if m, err := strconv.Atoi(c.WGMTU); err == nil && m > 0 {
+					mtu = m
+				}
 			}
 			return map[string]any{
 				"secretKey": c.Secret,
-				"address":   []string{"172.16.0.2/32"},
-				"peers": []any{map[string]any{
-					"publicKey": c.PeerKey,
-					"endpoint":  fmt.Sprintf("%s:%d", c.Address, port),
-				}},
-				"mtu": 1420,
+				"address":   strings.Split(local, ","),
+				"peers":     []any{peer},
+				"mtu":       mtu,
 			}, nil
 		},
 	}
 
 	protocolRegistry["hysteria"] = protocolSpec{
-		name: "hysteria", needsAddr: true, needsSecret: true, secretLabel: "认证密钥",
+		name: "hysteria", needsAddr: true, needsSecret: true, secretLabel: "认证密钥", tlsOnly: true,
 		build: func(c *guiConfig, port int) (map[string]any, error) {
 			return map[string]any{
 				"version": 2, "address": c.Address, "port": port,
@@ -176,32 +235,53 @@ func init() {
 	}
 
 	protocolRegistry["masque"] = protocolSpec{
-		name: "masque", needsAddr: true,
+		name: "masque", needsAddr: true, tlsOnly: true,
 		fields: []fieldSpec{
 			textField("密码（可选）", "", func(c *guiConfig) *string { return &c.Secret }),
+			textField("远程 DNS（逗号分隔，可选）", "8.8.8.8,1.1.1.1", func(c *guiConfig) *string { return &c.RemoteDNS }),
 		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
 			s := map[string]any{"address": c.Address, "port": port}
 			if c.Secret != "" {
 				s["users"] = []any{map[string]any{"pass": c.Secret, "level": 8}}
 			}
+			if c.RemoteDNS != "" {
+				s["remoteDNS"] = strings.Split(c.RemoteDNS, ",")
+			}
 			return s, nil
 		},
 	}
 
 	protocolRegistry["freedom"] = protocolSpec{
-		name: "freedom", build: simpleSettings("freedom"),
+		name: "freedom",
+		fields: []fieldSpec{
+			selectField("域名解析策略", func(c *guiConfig) *string { return &c.FreedomDomainStrategy }, domainStrategies),
+		},
+		build: func(c *guiConfig, port int) (map[string]any, error) {
+			s := map[string]any{}
+			if c.FreedomDomainStrategy != "" {
+				s["domainStrategy"] = c.FreedomDomainStrategy
+			}
+			return s, nil
+		},
 	}
 	protocolRegistry["blackhole"] = protocolSpec{
-		name: "blackhole", build: simpleSettings("blackhole"),
+		name: "blackhole", build: func(c *guiConfig, port int) (map[string]any, error) { return map[string]any{}, nil },
 	}
 	protocolRegistry["dns"] = protocolSpec{
-		name: "dns", build: simpleSettings("dns"),
+		name: "dns", build: func(c *guiConfig, port int) (map[string]any, error) { return map[string]any{}, nil },
 	}
 	protocolRegistry["loopback"] = protocolSpec{
 		name: "loopback",
+		fields: []fieldSpec{
+			textField("入站标签", "mixed-in", func(c *guiConfig) *string { return &c.InboundTag }),
+		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
-			return map[string]any{"inboundTag": "socks-in"}, nil
+			tag := c.InboundTag
+			if tag == "" {
+				tag = "mixed-in"
+			}
+			return map[string]any{"inboundTag": tag}, nil
 		},
 	}
 }
@@ -232,19 +312,8 @@ func (c *guiConfig) buildStream() map[string]any {
 	}
 	switch c.Security {
 	case "tls":
-		sni := c.SNI
-		if sni == "" {
-			sni = c.Address
-		}
-		tls := map[string]any{"serverName": sni, "allowInsecure": c.AllowInsecure}
-		if c.ALPN != "" {
-			tls["alpn"] = strings.Split(c.ALPN, ",")
-		}
-		if c.Fingerprint != "" {
-			tls["fingerprint"] = c.Fingerprint
-		}
 		s["security"] = "tls"
-		s["tlsSettings"] = tls
+		s["tlsSettings"] = c.buildTLSSettings()
 	case "reality":
 		sni := c.SNI
 		if sni == "" {
@@ -257,6 +326,31 @@ func (c *guiConfig) buildStream() map[string]any {
 		}
 	}
 	return s
+}
+
+// buildStreamTLS renders streamSettings for QUIC-native protocols (hysteria,
+// masque): TLS only, no transport network selection.
+func (c *guiConfig) buildStreamTLS() map[string]any {
+	if c.Security != "tls" {
+		return nil
+	}
+	return map[string]any{"security": "tls", "tlsSettings": c.buildTLSSettings()}
+}
+
+// buildTLSSettings renders tlsSettings shared by the TLS and REALITY paths.
+func (c *guiConfig) buildTLSSettings() map[string]any {
+	sni := c.SNI
+	if sni == "" {
+		sni = c.Address
+	}
+	tls := map[string]any{"serverName": sni, "allowInsecure": c.AllowInsecure}
+	if c.ALPN != "" {
+		tls["alpn"] = strings.Split(c.ALPN, ",")
+	}
+	if c.Fingerprint != "" {
+		tls["fingerprint"] = c.Fingerprint
+	}
+	return tls
 }
 
 // buildOutbound assembles the proxy outbound from the active protocol spec.
@@ -278,6 +372,9 @@ func (c *guiConfig) buildOutbound() (map[string]any, error) {
 	if s.needsSecret && strings.TrimSpace(c.Secret) == "" {
 		return nil, errors.New(s.secretLabel + "不能为空")
 	}
+	if s.tlsOnly && c.Security != "tls" {
+		return nil, errors.New(c.Protocol + " 基于 QUIC，需要在安全中选择 TLS")
+	}
 
 	settings, err := s.build(c, port)
 	if err != nil {
@@ -287,6 +384,11 @@ func (c *guiConfig) buildOutbound() (map[string]any, error) {
 
 	if s.stream {
 		if st := c.buildStream(); st != nil {
+			o["streamSettings"] = st
+		}
+	}
+	if s.tlsOnly {
+		if st := c.buildStreamTLS(); st != nil {
 			o["streamSettings"] = st
 		}
 	}

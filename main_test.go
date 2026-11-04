@@ -1,8 +1,12 @@
 package main
 
 import (
+	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -12,7 +16,7 @@ import (
 func TestView(t *testing.T) {
 	a := &app{cfg: defaultConfig()}
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"Sun Ray", "全局", "服务器", "日志", "入站（本机代理）", "已停止", "启动", "路由预设", "日志级别"} {
+	for _, want := range []string{"Sun Ray", "全局", "服务器", "日志", "入站（本机代理）", "监听端口", "已停止", "启动", "路由预设", "日志级别"} {
 		if !tt.HasText(want) {
 			t.Errorf("view missing text %q; texts: %v", want, tt.Texts())
 		}
@@ -96,6 +100,8 @@ func TestBuildJSONAllProtocols(t *testing.T) {
 		c.Protocol = proto
 		c.Address, c.Port, c.Secret = "s.example.com", "443", "testsecret"
 		c.PeerKey = "peerpubkey"
+		c.Security = "tls" // hysteria/masque require TLS
+		c.SNI = "s.example.com"
 		data, err := c.buildJSON()
 		if err != nil {
 			t.Errorf("protocol %s: %v", proto, err)
@@ -128,7 +134,7 @@ func TestCoreStartStop(t *testing.T) {
 	c := defaultConfig()
 	c.Protocol = "freedom" // no server needed
 	c.RouteCN, c.RouteAds = true, true
-	c.SocksPort, c.HTTPPort = "39441", "39442"
+	c.ListenPort = "39441"
 	data, err := c.buildJSON()
 	if err != nil {
 		t.Fatal(err)

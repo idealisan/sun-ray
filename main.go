@@ -25,10 +25,11 @@ const (
 )
 
 type app struct {
-	cfg  guiConfig
-	core xrayCore
-	win  *mygo.Window
-	tab  int // selected tab in the main window
+	cfg   guiConfig
+	core  xrayCore
+	win   *mygo.Window
+	tab   int         // selected tab in the main window
+	saver configSaver // debounced persistence to ~/sunray.json
 
 	logs []string // xray log lines, newest last, capped
 
@@ -47,6 +48,7 @@ func (a *app) addLog(line string) {
 // start validates the fields, builds the config and boots the in-process
 // core, all through function calls.
 func (a *app) start() {
+	a.saver.maybeSave(a.cfg, true)
 	cfgJSON, err := a.cfg.buildJSON()
 	if err != nil {
 		a.addLog("[sun-ray] " + err.Error())
@@ -60,6 +62,7 @@ func (a *app) start() {
 }
 
 func (a *app) stop() {
+	a.saver.maybeSave(a.cfg, true)
 	if err := a.core.Stop(); err != nil {
 		a.addLog("[sun-ray] 停止出错: " + err.Error())
 		return
@@ -99,6 +102,7 @@ func fmtBytes(n int64) string {
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
 	running := a.core.Running()
+	a.saver.maybeSave(a.cfg, false)
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
 		// Header: title, live speeds, status, start/stop.
@@ -136,11 +140,8 @@ func (a *app) globalTab(c *ui.Context) {
 	ui.Row(c).Fill().Gap(24).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "入站（本机代理）").Bold()
-			ui.Field(c, "SOCKS 端口", func() {
-				ui.TextInput(c, &cfg.SocksPort).Placeholder("10808")
-			})
-			ui.Field(c, "HTTP 端口", func() {
-				ui.TextInput(c, &cfg.HTTPPort).Placeholder("10809")
+			ui.Field(c, "监听端口（SOCKS 与 HTTP 共用）", func() {
+				ui.TextInput(c, &cfg.ListenPort).Placeholder("10808")
 			})
 			ui.Checkbox(c, &cfg.AllowLAN, "允许局域网连接")
 			ui.Checkbox(c, &cfg.Sniffing, "流量嗅探（域名分流需要）")
@@ -199,14 +200,23 @@ func (a *app) serverTab(c *ui.Context) {
 				ui.Field(c, "Path", func() { ui.TextInput(c, &cfg.Path) })
 				ui.Field(c, "Host", func() { ui.TextInput(c, &cfg.Host) })
 			}
+		}
 
+		// Security: full options for stream protocols, TLS-only for QUIC ones.
+		if sp.stream || sp.tlsOnly {
 			ui.Text(c, "安全").Bold()
-			renderField(c, securityField, cfg)
+			if sp.tlsOnly {
+				renderField(c, securityQuicField, cfg)
+			} else {
+				renderField(c, securityField, cfg)
+			}
 			switch cfg.Security {
 			case "tls":
 				ui.Field(c, "SNI（留空用地址）", func() { ui.TextInput(c, &cfg.SNI) })
-				ui.Field(c, "ALPN（逗号分隔）", func() { ui.TextInput(c, &cfg.ALPN) })
-				renderField(c, fingerprintField, cfg)
+				ui.Field(c, "ALPN（逗号分隔，可选）", func() { ui.TextInput(c, &cfg.ALPN) })
+				if sp.stream {
+					renderField(c, fingerprintField, cfg)
+				}
 				ui.Checkbox(c, &cfg.AllowInsecure, "允许不安全证书")
 			case "reality":
 				ui.Field(c, "SNI / 伪装域名", func() { ui.TextInput(c, &cfg.SNI) })
@@ -231,10 +241,11 @@ func (a *app) logTab(c *ui.Context) {
 
 // Shared field specs for settings that appear outside protocol fields.
 var (
-	logLevelField    = selectField("日志级别", func(c *guiConfig) *string { return &c.LogLevel }, logLevels)
-	networkField     = selectField("传输", func(c *guiConfig) *string { return &c.Network }, networks)
-	securityField    = selectField("方式", func(c *guiConfig) *string { return &c.Security }, securities)
-	fingerprintField = selectField("uTLS 指纹", func(c *guiConfig) *string { return &c.Fingerprint }, fingerprints)
+	logLevelField     = selectField("日志级别", func(c *guiConfig) *string { return &c.LogLevel }, logLevels)
+	networkField      = selectField("传输", func(c *guiConfig) *string { return &c.Network }, networks)
+	securityField     = selectField("方式", func(c *guiConfig) *string { return &c.Security }, securities)
+	securityQuicField = selectField("方式", func(c *guiConfig) *string { return &c.Security }, quicSecurities)
+	fingerprintField  = selectField("uTLS 指纹", func(c *guiConfig) *string { return &c.Fingerprint }, fingerprints)
 )
 
 // renderField draws one fieldSpec: radio group for up to four options,
@@ -263,7 +274,7 @@ func renderField(c *ui.Context, f fieldSpec, cfg *guiConfig) {
 }
 
 func main() {
-	a := &app{cfg: defaultConfig()}
+	a := &app{cfg: loadConfig()}
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title: "Sun Ray",

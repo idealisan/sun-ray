@@ -24,60 +24,65 @@ import (
 
 // guiConfig is everything the UI edits; protocolSpec binds into it.
 type guiConfig struct {
-	LogLevel string
-	Sniffing bool // sniff inbound connection domains, needed for domain routing
+	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
+	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
+	Sniffing   bool   `json:"sniffing"`   // sniff connection domains, needed for domain routing
 
-	SocksPort string // local SOCKS5 port, e.g. "10808"
-	HTTPPort  string // local HTTP port, e.g. "10809"
-	AllowLAN  bool   // listen on 0.0.0.0 instead of 127.0.0.1
+	LogLevel string `json:"logLevel"`
+	RouteCN  bool   `json:"routeCN"`  // direct traffic to mainland China sites/IPs
+	RouteAds bool   `json:"routeAds"` // block ad domains
 
-	RouteCN  bool // direct traffic to mainland China sites/IPs
-	RouteAds bool // block ad domains
+	Protocol string `json:"protocol"` // key into protocolRegistry
+	Address  string `json:"address"`  // server address
+	Port     string `json:"port"`     // server port
+	Secret   string `json:"secret"`   // UUID / password / auth / secretKey
+	Method   string `json:"method"`   // shadowsocks cipher
+	User     string `json:"user"`     // socks / http outbound user
+	Pass     string `json:"pass"`     // socks / http outbound password
+	PeerKey  string `json:"peerKey"`  // wireguard peer public key
+	Flow     string `json:"flow"`     // vless flow, xtls-rprx-vision or empty
 
-	Protocol string // key into protocolRegistry
-	Address  string // server address
-	Port     string // server port
-	Secret   string // UUID / password / auth / secretKey
-	Method   string // shadowsocks cipher
-	User     string // socks / http outbound user
-	Pass     string // socks / http outbound password
-	PeerKey  string // wireguard peer public key
-	Flow     string // vless flow, "" or xtls-rprx-vision
+	VlessEncrypt          string `json:"vlessEncrypt"`          // vless encryption, default none
+	VMessSecurity         string `json:"vmessSecurity"`         // vmess user security, default auto
+	FreedomDomainStrategy string `json:"freedomDomainStrategy"` // freedom domainStrategy
+	InboundTag            string `json:"inboundTag"`            // loopback inboundTag
+	WGPreSharedKey        string `json:"wgPreSharedKey"`
+	WGKeepAlive           string `json:"wgKeepAlive"`
+	WGMTU                 string `json:"wgMtu"`
+	WGLocalAddr           string `json:"wgLocalAddr"`
+	RemoteDNS             string `json:"remoteDNS"` // masque, comma separated
 
-	Network string // transport: tcp, ws, grpc, httpupgrade
-	Path    string // ws / httpupgrade path
-	Host    string // ws / httpupgrade Host header
-	Service string // grpc serviceName
+	Network string `json:"network"` // transport: tcp, ws, grpc, httpupgrade
+	Path    string `json:"path"`    // ws / httpupgrade path
+	Host    string `json:"host"`    // ws / httpupgrade Host header
+	Service string `json:"service"` // grpc serviceName
 
-	Security      string // none, tls, reality
-	SNI           string
-	ALPN          string // comma separated, e.g. "h2,http/1.1"
-	Fingerprint   string // uTLS fingerprint: chrome, firefox, ...
-	AllowInsecure bool
-	PublicKey     string // reality
-	ShortID       string // reality
-	SpiderX       string // reality
+	Security      string `json:"security"` // none, tls, reality
+	SNI           string `json:"sni"`
+	ALPN          string `json:"alpn"`        // comma separated, e.g. "h2,http/1.1"
+	Fingerprint   string `json:"fingerprint"` // uTLS fingerprint: chrome, firefox, ...
+	AllowInsecure bool   `json:"allowInsecure"`
+	PublicKey     string `json:"publicKey"` // reality
+	ShortID       string `json:"shortID"`   // reality
+	SpiderX       string `json:"spiderX"`   // reality
 }
 
 func defaultConfig() guiConfig {
 	return guiConfig{
-		LogLevel: "info", Sniffing: true,
-		SocksPort: "10808", HTTPPort: "10809",
+		ListenPort: "10808", Sniffing: true,
+		LogLevel: "info",
 		Protocol: "vless", Port: "443", Method: "aes-256-gcm",
-		Network: "tcp", Security: "none", Fingerprint: "chrome", SpiderX: "/",
+		VMessSecurity: "auto",
+		Network:       "tcp", Security: "none", Fingerprint: "chrome", SpiderX: "/",
 	}
 }
 
 // buildJSON renders the GUI fields into a full xray JSON config, with stats
 // and policy enabled so the UI can read traffic counters.
 func (c *guiConfig) buildJSON() ([]byte, error) {
-	socksPort, err := strconv.Atoi(c.SocksPort)
-	if err != nil || socksPort < 1 || socksPort > 65535 {
-		return nil, fmt.Errorf("SOCKS 端口无效: %q", c.SocksPort)
-	}
-	httpPort, err := strconv.Atoi(c.HTTPPort)
-	if err != nil || httpPort < 1 || httpPort > 65535 {
-		return nil, fmt.Errorf("HTTP 端口无效: %q", c.HTTPPort)
+	listenPort, err := strconv.Atoi(c.ListenPort)
+	if err != nil || listenPort < 1 || listenPort > 65535 {
+		return nil, fmt.Errorf("监听端口无效: %q", c.ListenPort)
 	}
 	listen := "127.0.0.1"
 	if c.AllowLAN {
@@ -129,22 +134,16 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 			},
 		},
 		"inbounds": []any{
+			// Mixed inbound: one port auto-detects SOCKS and HTTP clients.
 			map[string]any{
-				"tag": "socks-in", "listen": listen, "port": socksPort,
-				"protocol": "socks", "sniffing": sniffing,
+				"tag": "mixed-in", "listen": listen, "port": listenPort,
+				"protocol": "mixed", "sniffing": sniffing,
 				"settings": map[string]any{"auth": "noauth", "udp": true},
-			},
-			map[string]any{
-				"tag": "http-in", "listen": listen, "port": httpPort,
-				"protocol": "http", "sniffing": sniffing,
-				"settings": map[string]any{"allowTransparent": false},
 			},
 		},
 	}
 	return json.MarshalIndent(cfg, "", "  ")
-}
-
-// guiHandler turns xray log messages into lines for the UI.
+} // guiHandler turns xray log messages into lines for the UI.
 type guiHandler struct{ fn func(string) }
 
 func (h *guiHandler) Handle(msg log.Message) {
