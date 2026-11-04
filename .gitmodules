@@ -1,0 +1,6 @@
+[submodule "mygo"]
+	path = mygo
+	url = https://github.com/egoist/mygo
+[submodule "xray-core"]
+	path = xray-core
+	url = https://github.com/xtls/xray-core

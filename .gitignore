@@ -1,0 +1,12 @@
+# 构建产物
+/build/
+/dist/
+*.exe
+xray
+
+# 前端
+node_modules/
+
+# 编辑器
+.idea/
+.vscode/
