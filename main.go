@@ -30,8 +30,7 @@ type app struct {
 	win  *mygo.Window
 	tab  int // selected tab in the main window
 
-	logWin *mygo.Window // the run log, optionally popped out
-	logs   []string     // xray log lines, newest last, capped
+	logs []string // xray log lines, newest last, capped
 
 	upSpeed, downSpeed string // per-second rates shown in the header
 }
@@ -42,33 +41,6 @@ func (a *app) addLog(line string) {
 		if len(a.logs) > maxLogLines {
 			a.logs = a.logs[len(a.logs)-maxLogLines:]
 		}
-	})
-	if a.logWin != nil && !a.logWin.IsDestroyed() {
-		a.logWin.Update(func() {}) // invalidate the log window
-	}
-}
-
-// toggleLogWindow opens the log window, or brings it back to the front.
-func (a *app) toggleLogWindow() {
-	if a.logWin != nil && !a.logWin.IsDestroyed() {
-		a.logWin.Show()
-		return
-	}
-	a.logWin = mygo.NewWindow(mygo.WindowOptions{
-		Title: "Sun Ray 运行日志",
-		Width: 660, Height: 440,
-		Content: ui.View(a.logView),
-	})
-	a.logWin.OnClosed(func() { a.logWin = nil })
-}
-
-// logView is the content of the popped-out log window.
-func (a *app) logView(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Fill().Padding(10, 12).Children(func() {
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted)
-		})
 	})
 }
 
@@ -124,7 +96,6 @@ func fmtBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f PB", v/unit)
 }
-
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
 	running := a.core.Running()
@@ -144,9 +115,6 @@ func (a *app) view(c *ui.Context) {
 				if ui.PrimaryButton(c.Key("start"), "启动").Clicked() {
 					a.start()
 				}
-			}
-			if ui.Button(c.Key("logwin"), "弹出日志").Clicked() {
-				a.toggleLogWindow()
 			}
 		})
 

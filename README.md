@@ -61,6 +61,18 @@ go build -o sun-ray.exe .
 go test ./...
 ```
 
+## 内嵌 geo 资产
+
+路由预设需要 geoip/geosite 数据。本项目把它们（只提取 \`CN\` 与 \`category-ads-all\`，共约 400KB）直接嵌入二进制，并通过 \`filesystem.AssetProvider\` 从内存提供给 xray-core——单文件分发，用户机器零额外文件。
+
+上游 xray-core 尚无该注入点，仓库附带一个最小补丁 \`patches/xray-core-embedded-assets.patch\`（约 10 行），本地与 CI 在 checkout 子模块后应用：
+
+\`\`\`bash
+git -C xray-core apply ../patches/xray-core-embedded-assets.patch
+\`\`\`
+
+若更新子模块，需确认补丁仍可应用（必要时重新生成）。
+
 ## CI 与发布
 
 GitHub Actions（`.github/workflows/build.yml`）：

@@ -1,0 +1,16 @@
+diff --git a/common/platform/filesystem/file.go b/common/platform/filesystem/file.go
+index 55c0e93..173c5e1 100644
+--- a/common/platform/filesystem/file.go
++++ b/common/platform/filesystem/file.go
+@@ -28,6 +28,11 @@ func ReadFile(path string) ([]byte, error) {
+ }
+ 
+ func OpenAsset(file string) (io.ReadCloser, int64, error) {
++	if AssetProvider != nil {
++		if r, size, ok := AssetProvider(file); ok {
++			return r, size, nil
++		}
++	}
+ 	path, info, err := getAssetFileLocation(file)
+ 	if err != nil {
+ 		return nil, 0, err

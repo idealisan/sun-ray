@@ -122,10 +122,12 @@ func TestBuildJSONErrors(t *testing.T) {
 	}
 }
 
-// Smoke test: boot and close the real in-process core, function calls only.
+// Smoke test: boot and close the real in-process core with the routing
+// presets on, proving the embedded geo assets load from memory.
 func TestCoreStartStop(t *testing.T) {
 	c := defaultConfig()
 	c.Protocol = "freedom" // no server needed
+	c.RouteCN, c.RouteAds = true, true
 	c.SocksPort, c.HTTPPort = "39441", "39442"
 	data, err := c.buildJSON()
 	if err != nil {
