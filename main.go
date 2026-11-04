@@ -90,6 +90,7 @@ func fmtBytes(n int64) string {
 
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
+	cfg := &a.cfg
 	running := a.core.Running()
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
@@ -110,53 +111,101 @@ func (a *app) view(c *ui.Context) {
 			}
 		})
 
-		// Settings, inbound on the left, outbound on the right.
-		ui.Row(c).Gap(20).Children(func() {
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				ui.Text(c, "入站（本机代理）").Bold()
-				ui.Field(c, "SOCKS 端口", func() {
-					ui.TextInput(c, &a.cfg.SocksPort).Placeholder("10808")
-				})
-				ui.Field(c, "HTTP 端口", func() {
-					ui.TextInput(c, &a.cfg.HTTPPort).Placeholder("10809")
-				})
-				ui.Checkbox(c, &a.cfg.AllowLAN, "允许局域网连接")
-			})
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				ui.Text(c, "出站（服务器）").Bold()
-				ui.Field(c, "协议", func() {
-					ui.Select(c, &a.cfg.Protocol, protocols)
-				})
-				ui.Field(c, "地址", func() {
-					ui.TextInput(c, &a.cfg.Address).Placeholder("example.com")
-				})
-				ui.Field(c, "端口", func() {
-					ui.TextInput(c, &a.cfg.Port).Placeholder("443")
-				})
-				if a.cfg.Protocol != "freedom" {
-					ui.Field(c, "UUID / 密码", func() {
-						ui.TextInput(c, &a.cfg.Secret)
+		// Settings scroll: inbound and routing on the left, outbound on the right.
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Row(c).Gap(24).AlignItems(ui.Stretch).Children(func() {
+				// Left: inbound, log level, routing presets.
+				ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+					ui.Text(c, "入站（本机代理）").Bold()
+					ui.Field(c, "SOCKS 端口", func() {
+						ui.TextInput(c, &cfg.SocksPort).Placeholder("10808")
 					})
-				}
-				if a.cfg.Protocol == "shadowsocks" {
-					ui.Field(c, "加密方法", func() {
-						ui.TextInput(c, &a.cfg.Method)
+					ui.Field(c, "HTTP 端口", func() {
+						ui.TextInput(c, &cfg.HTTPPort).Placeholder("10809")
 					})
-				}
-				if a.cfg.Protocol != "freedom" {
-					ui.Checkbox(c, &a.cfg.UseTLS, "启用 TLS")
-					if a.cfg.UseTLS {
-						ui.Field(c, "SNI（留空用地址）", func() {
-							ui.TextInput(c, &a.cfg.SNI)
+					ui.Checkbox(c, &cfg.AllowLAN, "允许局域网连接")
+					ui.Checkbox(c, &cfg.Sniffing, "流量嗅探（域名分流需要）")
+
+					ui.Text(c, "日志").Bold()
+					ui.Field(c, "日志级别", func() {
+						ui.Select(c, &cfg.LogLevel, logLevels)
+					})
+
+					ui.Text(c, "路由预设").Bold()
+					ui.Checkbox(c, &cfg.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
+					ui.Checkbox(c, &cfg.RouteAds, "屏蔽广告（geosite:category-ads-all）")
+				})
+				// Right: outbound protocol and its parameters.
+				ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+					ui.Text(c, "出站（服务器）").Bold()
+					ui.Field(c, "协议", func() {
+						ui.Select(c, &cfg.Protocol, protocols)
+					})
+					if needsAddress(cfg.Protocol) {
+						ui.Field(c, "地址", func() {
+							ui.TextInput(c, &cfg.Address).Placeholder("example.com")
+						})
+						ui.Field(c, "端口", func() {
+							ui.TextInput(c, &cfg.Port).Placeholder("443")
 						})
 					}
-				}
+					if needsSecret(cfg.Protocol) {
+						ui.Field(c, "UUID / 密码", func() {
+							ui.TextInput(c, &cfg.Secret)
+						})
+					}
+					switch cfg.Protocol {
+					case "shadowsocks":
+						ui.Field(c, "加密方法", func() { ui.TextInput(c, &cfg.Method) })
+					case "socks", "http":
+						ui.Field(c, "用户名（可选）", func() { ui.TextInput(c, &cfg.User) })
+						ui.Field(c, "密码（可选）", func() { ui.TextInput(c, &cfg.Pass) })
+					case "wireguard":
+						ui.Field(c, "本机私钥", func() { ui.TextInput(c, &cfg.Secret) })
+						ui.Field(c, "对端公钥", func() { ui.TextInput(c, &cfg.PeerKey) })
+					case "vless":
+						ui.Field(c, "Flow", func() { ui.Select(c, &cfg.Flow, flows) })
+					}
+
+					// Transport and security apply to the TCP-family protocols.
+					if streamCapable(cfg.Protocol) {
+						ui.Text(c, "传输层").Bold()
+						ui.Field(c, "传输", func() { ui.Select(c, &cfg.Network, networks) })
+						switch cfg.Network {
+						case "ws":
+							ui.Field(c, "WS Path", func() { ui.TextInput(c, &cfg.Path) })
+							ui.Field(c, "WS Host", func() { ui.TextInput(c, &cfg.Host) })
+						case "grpc":
+							ui.Field(c, "serviceName", func() { ui.TextInput(c, &cfg.Service) })
+							ui.Field(c, "authority", func() { ui.TextInput(c, &cfg.Host) })
+						case "httpupgrade":
+							ui.Field(c, "Path", func() { ui.TextInput(c, &cfg.Path) })
+							ui.Field(c, "Host", func() { ui.TextInput(c, &cfg.Host) })
+						}
+
+						ui.Text(c, "安全").Bold()
+						ui.Field(c, "方式", func() { ui.Select(c, &cfg.Security, securities) })
+						switch cfg.Security {
+						case "tls":
+							ui.Field(c, "SNI（留空用地址）", func() { ui.TextInput(c, &cfg.SNI) })
+							ui.Field(c, "ALPN（逗号分隔）", func() { ui.TextInput(c, &cfg.ALPN) })
+							ui.Field(c, "uTLS 指纹", func() { ui.TextInput(c, &cfg.Fingerprint).Placeholder("chrome") })
+							ui.Checkbox(c, &cfg.AllowInsecure, "允许不安全证书")
+						case "reality":
+							ui.Field(c, "SNI / 伪装域名", func() { ui.TextInput(c, &cfg.SNI) })
+							ui.Field(c, "Public Key", func() { ui.TextInput(c, &cfg.PublicKey) })
+							ui.Field(c, "Short ID", func() { ui.TextInput(c, &cfg.ShortID) })
+							ui.Field(c, "SpiderX", func() { ui.TextInput(c, &cfg.SpiderX) })
+							ui.Field(c, "uTLS 指纹", func() { ui.TextInput(c, &cfg.Fingerprint).Placeholder("chrome") })
+						}
+					}
+				})
 			})
 		})
 
-		// Log pane fed by xray's in-process log handler.
+		// Log pane fed by xray in-process log handler.
 		ui.Text(c, "运行日志").Bold()
-		ui.Scroll(c).Grow(1).Children(func() {
+		ui.Scroll(c).Height(170).Children(func() {
 			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted)
 		})
 	})
@@ -167,8 +216,8 @@ func main() {
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:  "Sun Ray",
-			Width:  780, Height: 580,
-			MinWidth: 640, MinHeight: 480,
+			Width:  900, Height: 700,
+			MinWidth: 720, MinHeight: 560,
 			Content: ui.View(a.view),
 		})
 		go a.pollTraffic()
