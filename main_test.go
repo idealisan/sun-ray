@@ -1,12 +1,8 @@
 package main
 
 import (
-	"net/http"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
