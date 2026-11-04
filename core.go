@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -168,7 +167,7 @@ func (x *xrayCore) Running() bool {
 
 // Start builds and starts a core instance in this process. onLog receives
 // xray log lines on arbitrary goroutines; it should hop to the UI thread.
-func (x *xrayCore) Start(cfgJSON []byte, allowInsecure bool, onLog func(string)) error {
+func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) error {
 	x.mu.Lock()
 	if x.instance != nil {
 		x.mu.Unlock()
@@ -183,13 +182,6 @@ func (x *xrayCore) Start(cfgJSON []byte, allowInsecure bool, onLog func(string))
 	coreConf, err := pbConf.Build()
 	if err != nil {
 		return fmt.Errorf("构建配置: %w", err)
-	}
-	// The patched core honors this env in GetTLSConfig (allowInsecure was
-	// removed from the upstream config format).
-	if allowInsecure {
-		os.Setenv("SUNRAY_ALLOW_INSECURE", "true")
-	} else {
-		os.Setenv("SUNRAY_ALLOW_INSECURE", "false")
 	}
 	inst, err := core.New(coreConf)
 	if err != nil {

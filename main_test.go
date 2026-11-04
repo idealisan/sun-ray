@@ -109,6 +109,28 @@ func TestBuildJSONAllProtocols(t *testing.T) {
 	}
 }
 
+// allowInsecure must reach tlsSettings, otherwise the core cannot skip
+// verification of self-signed / chain-incomplete servers (e.g. hysteria2).
+func TestBuildJSONAllowInsecure(t *testing.T) {
+	c := defaultConfig()
+	c.Protocol = "hysteria"
+	c.Address, c.Port, c.Secret = "jpp-raw.example.com", "443", "auth"
+	c.Security = "tls"
+	c.SNI = "jpproxy.example.com"
+	c.AllowInsecure = true
+	data, err := c.buildJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"allowInsecure": true`) {
+		t.Errorf("config missing allowInsecure; got %s", s)
+	}
+	if !strings.Contains(s, `"serverName": "jpproxy.example.com"`) {
+		t.Errorf("config missing SNI; got %s", s)
+	}
+}
+
 func TestBuildJSONErrors(t *testing.T) {
 	c := defaultConfig()
 	if _, err := c.buildJSON(); err == nil {
@@ -136,7 +158,7 @@ func TestCoreStartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var a app
-	if err := a.core.Start(data, false, func(string) {}); err != nil {
+	if err := a.core.Start(data, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	if !a.core.Running() {

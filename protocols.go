@@ -351,6 +351,9 @@ func (c *guiConfig) buildTLSSettings() map[string]any {
 		sni = c.Address
 	}
 	tls := map[string]any{"serverName": sni}
+	if c.AllowInsecure {
+		tls["allowInsecure"] = true
+	}
 	if c.ALPN != "" {
 		tls["alpn"] = strings.Split(c.ALPN, ",")
 	}
