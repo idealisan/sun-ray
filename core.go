@@ -90,8 +90,12 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 	}
 
 	// Simple routing: private ranges always go direct; presets add more.
+	// Private ranges are spelled out as CIDRs so no geoip.dat asset is needed.
 	rules := []any{
-		map[string]any{"type": "field", "ip": []string{"geoip:private"}, "outboundTag": "direct"},
+		map[string]any{"type": "field", "ip": []string{
+			"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+			"169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+		}, "outboundTag": "direct"},
 	}
 	outbounds := []any{proxy, map[string]any{"protocol": "freedom", "tag": "direct"}}
 	if c.RouteAds {
