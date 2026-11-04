@@ -127,7 +127,6 @@ func fmtBytes(n int64) string {
 
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
-	cfg := &a.cfg
 	running := a.core.Running()
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
