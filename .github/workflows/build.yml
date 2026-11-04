@@ -42,7 +42,11 @@ jobs:
           go test -v ./... 2>&1 | tee test-output.log
           code=${PIPESTATUS[0]}
           if [ $code -ne 0 ]; then
-            grep -E -- '--- FAIL|^panic:|Error Trace' test-output.log | head -30 | sed 's/^/::error::/'
+            tail -60 test-output.log | sed 's/^/::error::/'
+            echo '### Test output (tail)' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -60 test-output.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
           exit $code
 
