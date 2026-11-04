@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -211,16 +212,25 @@ func TestCoreStartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var a app
+	a.trayToggle = &mygo.MenuItem{}
 	if err := a.core.Start(data, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	if !a.core.Running() {
 		t.Fatal("core should be running")
 	}
+	a.updateTrayMenu()
+	if a.trayToggle.Label != "停止" {
+		t.Errorf("tray label while running = %q, want 停止", a.trayToggle.Label)
+	}
 	if err := a.core.Stop(); err != nil {
 		t.Fatal(err)
 	}
 	if a.core.Running() {
 		t.Fatal("core should be stopped")
+	}
+	a.updateTrayMenu()
+	if a.trayToggle.Label != "启动" {
+		t.Errorf("tray label while stopped = %q, want 启动", a.trayToggle.Label)
 	}
 }

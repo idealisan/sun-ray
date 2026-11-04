@@ -28,13 +28,14 @@ const (
 )
 
 type app struct {
-	cfg      appConfig
-	core     xrayCore
-	win      *mygo.Window
-	tray     *mygo.Tray
-	quitting bool        // a real quit is under way, so closing may proceed
-	tab      int         // selected tab in the main window
-	saver    configSaver // debounced persistence to ~/sunray.json
+	cfg        appConfig
+	core       xrayCore
+	win        *mygo.Window
+	tray       *mygo.Tray
+	trayToggle *mygo.MenuItem // start/stop entry in the tray menu
+	quitting   bool           // a real quit is under way, so closing may proceed
+	tab        int            // selected tab in the main window
+	saver      configSaver    // debounced persistence to ~/sunray.json
 
 	logs []string // xray log lines, newest last, capped
 
@@ -60,6 +61,7 @@ func (a *app) addLog(line string) {
 // start validates the active server, builds the config and boots the
 // in-process core, all through function calls.
 func (a *app) start() {
+	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
 	s := a.activeServer()
 	if s == nil {
@@ -79,6 +81,7 @@ func (a *app) start() {
 }
 
 func (a *app) stop() {
+	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
 	if err := a.core.Stop(); err != nil {
 		a.addLog("[sun-ray] 停止出错: " + err.Error())
@@ -592,8 +595,35 @@ func (a *app) toggleMain() {
 	a.showMain()
 }
 
+// coreActionLabel is the tray entry for the core's next action.
+func (a *app) coreActionLabel() string {
+	if a.core.Running() {
+		return "停止"
+	}
+	return "启动"
+}
+
+// updateTrayMenu keeps the start/stop entry in step with the core. The
+// item is shared by the popup menus of macOS and Windows and by the
+// persistent menu of Linux.
+func (a *app) updateTrayMenu() {
+	if a.trayToggle != nil {
+		a.trayToggle.SetLabel(a.coreActionLabel())
+	}
+}
+
+// toggleCore starts or stops the core from the tray.
+func (a *app) toggleCore() {
+	if a.core.Running() {
+		a.stop()
+		return
+	}
+	a.start()
+}
+
 // setUpTray adds the menu bar / notification area icon. A right click opens
-// a menu with Show and Quit; a left click shows or hides the main window.
+// a menu with start/stop, Show and Quit; a left click shows or hides the
+// main window.
 func (a *app) setUpTray() {
 	icon, template := trayColorPNG, false
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
@@ -612,7 +642,12 @@ func (a *app) setUpTray() {
 		return
 	}
 	a.tray = tray
+	a.trayToggle = &mygo.MenuItem{
+		Label: a.coreActionLabel(),
+		Click: func(*mygo.MenuItem, *mygo.Window) { a.toggleCore() },
+	}
 	menu := mygo.NewMenu([]*mygo.MenuItem{
+		a.trayToggle,
 		{Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) { a.showMain() }},
 		mygo.Separator(),
 		{Role: mygo.RoleQuit},
@@ -624,6 +659,7 @@ func (a *app) setUpTray() {
 	}
 	tray.OnClick(a.toggleMain)
 	tray.OnRightClick(func() {
+		a.updateTrayMenu()
 		tray.SetMenu(menu)
 		defer tray.SetMenu(nil)
 		tray.PopUpMenu()
