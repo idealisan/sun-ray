@@ -20,6 +20,9 @@ jobs:
           - os: macos-latest
             name: darwin-arm64
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
