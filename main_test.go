@@ -136,7 +136,7 @@ func TestCoreStartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var a app
-	if err := a.core.Start(data, func(string) {}); err != nil {
+	if err := a.core.Start(data, false, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	if !a.core.Running() {

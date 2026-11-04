@@ -227,24 +227,17 @@ func init() {
 	protocolRegistry["hysteria"] = protocolSpec{
 		name: "hysteria", needsAddr: true, needsSecret: true, secretLabel: "认证密钥", tlsOnly: true,
 		build: func(c *guiConfig, port int) (map[string]any, error) {
-			return map[string]any{
-				"version": 2, "address": c.Address, "port": port,
-				"users": []any{map[string]any{"auth": c.Secret, "level": 8}},
-			}, nil
+			// hysteria2: auth travels in the hysteria transport settings, not here.
+			return map[string]any{"version": 2, "address": c.Address, "port": port}, nil
 		},
 	}
-
 	protocolRegistry["masque"] = protocolSpec{
 		name: "masque", needsAddr: true, tlsOnly: true,
 		fields: []fieldSpec{
-			textField("密码（可选）", "", func(c *guiConfig) *string { return &c.Secret }),
 			textField("远程 DNS（逗号分隔，可选）", "8.8.8.8,1.1.1.1", func(c *guiConfig) *string { return &c.RemoteDNS }),
 		},
 		build: func(c *guiConfig, port int) (map[string]any, error) {
 			s := map[string]any{"address": c.Address, "port": port}
-			if c.Secret != "" {
-				s["users"] = []any{map[string]any{"pass": c.Secret, "level": 8}}
-			}
 			if c.RemoteDNS != "" {
 				s["remoteDNS"] = strings.Split(c.RemoteDNS, ",")
 			}
@@ -328,13 +321,27 @@ func (c *guiConfig) buildStream() map[string]any {
 	return s
 }
 
-// buildStreamTLS renders streamSettings for QUIC-native protocols (hysteria,
-// masque): TLS only, no transport network selection.
-func (c *guiConfig) buildStreamTLS() map[string]any {
+// buildStreamQUIC renders streamSettings for QUIC-native protocols:
+// hysteria and masque ride their own transport with auth in the
+// transport settings, plus TLS on top.
+func (c *guiConfig) buildStreamQUIC() map[string]any {
 	if c.Security != "tls" {
 		return nil
 	}
-	return map[string]any{"security": "tls", "tlsSettings": c.buildTLSSettings()}
+	s := map[string]any{"security": "tls", "tlsSettings": c.buildTLSSettings()}
+	switch c.Protocol {
+	case "hysteria":
+		s["network"] = "hysteria"
+		s["hysteriaSettings"] = map[string]any{"version": 2, "auth": c.Secret}
+	case "masque":
+		s["network"] = "masque"
+		ms := map[string]any{}
+		if c.Secret != "" {
+			ms["pass"] = c.Secret
+		}
+		s["masqueSettings"] = ms
+	}
+	return s
 }
 
 // buildTLSSettings renders tlsSettings shared by the TLS and REALITY paths.
@@ -343,7 +350,7 @@ func (c *guiConfig) buildTLSSettings() map[string]any {
 	if sni == "" {
 		sni = c.Address
 	}
-	tls := map[string]any{"serverName": sni, "allowInsecure": c.AllowInsecure}
+	tls := map[string]any{"serverName": sni}
 	if c.ALPN != "" {
 		tls["alpn"] = strings.Split(c.ALPN, ",")
 	}
@@ -388,7 +395,7 @@ func (c *guiConfig) buildOutbound() (map[string]any, error) {
 		}
 	}
 	if s.tlsOnly {
-		if st := c.buildStreamTLS(); st != nil {
+		if st := c.buildStreamQUIC(); st != nil {
 			o["streamSettings"] = st
 		}
 	}

@@ -26,3 +26,18 @@ index 55c0e93..eae8cb0 100644
  	path, info, err := getAssetFileLocation(file)
  	if err != nil {
  		return nil, 0, err
+diff --git a/infra/conf/transport_security.go b/infra/conf/transport_security.go
+index 00e5387..61ee690 100644
+--- a/infra/conf/transport_security.go
++++ b/infra/conf/transport_security.go
+@@ -359,9 +359,7 @@ func (c *TLSConfig) Build() (proto.Message, error) {
+ 	config.RejectUnknownSni = c.RejectUnknownSNI
+ 	config.MasterKeyLog = c.MasterKeyLog
+ 
+-	if c.AllowInsecure {
+-		return nil, errors.PrintRemovedFeatureError(`"allowInsecure"`, `"pinnedPeerCertSha256"(pcs) and "verifyPeerCertByName"(vcn)`)
+-	}
++	// SUNRAY: allowInsecure is gated by the SUNRAY_ALLOW_INSECURE env in tls GetTLSConfig.
+ 	if c.PinnedPeerCertSha256 != "" {
+ 		for v := range strings.SplitSeq(c.PinnedPeerCertSha256, ",") {
+ 			v = strings.TrimSpace(v)

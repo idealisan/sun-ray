@@ -54,7 +54,7 @@ func (a *app) start() {
 		a.addLog("[sun-ray] " + err.Error())
 		return
 	}
-	if err := a.core.Start(cfgJSON, a.addLog); err != nil {
+	if err := a.core.Start(cfgJSON, a.cfg.AllowInsecure, a.addLog); err != nil {
 		a.addLog("[sun-ray] 启动失败: " + err.Error())
 		return
 	}
