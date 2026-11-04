@@ -10,28 +10,45 @@ import (
 // The view runs headless in tests; clicks behave like user input.
 func TestView(t *testing.T) {
 	a := &app{cfg: defaultConfig()}
-	tt := ui.NewTester(a.view, 900, 700)
-	for _, want := range []string{"Sun Ray", "入站（本机代理）", "出站（服务器）", "已停止", "启动", "协议", "地址", "路由预设", "传输层", "安全"} {
+	tt := ui.NewTester(a.view, 900, 640)
+	for _, want := range []string{"Sun Ray", "入站（本机代理）", "出站（服务器）", "已停止", "启动", "协议", "地址", "路由预设", "传输层", "安全", "日志"} {
 		if !tt.HasText(want) {
 			t.Errorf("view missing text %q; texts: %v", want, tt.Texts())
 		}
 	}
 }
 
+// Every protocol in the list must be registered and build a config.
+func TestRegistryComplete(t *testing.T) {
+	if len(protocolRegistry) != len(protocolList) {
+		t.Errorf("registry has %d entries, list has %d", len(protocolRegistry), len(protocolList))
+	}
+	for _, name := range protocolList {
+		sp, ok := protocolRegistry[name]
+		if !ok {
+			t.Errorf("protocol %s not registered", name)
+			continue
+		}
+		if sp.build == nil {
+			t.Errorf("protocol %s has no build func", name)
+		}
+	}
+}
+
 func TestBuildJSONVLESS(t *testing.T) {
-	c2 := defaultConfig()
-	c2.Address = "s.example.com"
-	c2.Secret = "11111111-2222-3333-4444-555555555555"
-	c2.Network = "ws"
-	c2.Path = "/wspath"
-	c2.Host = "cdn.example.com"
-	c2.Security = "reality"
-	c2.PublicKey = "pbkey123"
-	c2.ShortID = "abcd"
-	c2.Flow = "xtls-rprx-vision"
-	c2.RouteCN = true
-	c2.RouteAds = true
-	data, err := c2.buildJSON()
+	c := defaultConfig()
+	c.Address = "s.example.com"
+	c.Secret = "11111111-2222-3333-4444-555555555555"
+	c.Network = "ws"
+	c.Path = "/wspath"
+	c.Host = "cdn.example.com"
+	c.Security = "reality"
+	c.PublicKey = "pbkey123"
+	c.ShortID = "abcd"
+	c.Flow = "xtls-rprx-vision"
+	c.RouteCN = true
+	c.RouteAds = true
+	data, err := c.buildJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +78,7 @@ func TestBuildJSONVLESS(t *testing.T) {
 
 // Every registered outbound protocol must build a config without error.
 func TestBuildJSONAllProtocols(t *testing.T) {
-	for _, proto := range protocols {
+	for _, proto := range protocolList {
 		c := defaultConfig()
 		c.Protocol = proto
 		c.Address, c.Port, c.Secret = "s.example.com", "443", "testsecret"

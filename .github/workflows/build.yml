@@ -35,7 +35,16 @@ jobs:
 
       - name: Test
         if: runner.os == 'Linux'
-        run: go test ./...
+        run: |
+          go test -v ./... 2>&1 | tee test-output.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.name }}
+          path: test-output.log
 
       - name: Build
         run: |

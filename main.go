@@ -1,8 +1,9 @@
 package main
 
 // Sun Ray: a simple Xray GUI client in native UI. The xray-core library
-// runs inside this very process (see core.go); the window below is drawn
-// by mygo itself, with no webview.
+// runs inside this very process (see core.go + protocols.go); the window
+// below is drawn by mygo itself, with no webview. The run log lives in a
+// second window, opened from the toolbar.
 
 import (
 	"fmt"
@@ -21,7 +22,8 @@ type app struct {
 	core xrayCore
 	win  *mygo.Window
 
-	logs []string // xray log lines, newest last, capped
+	logWin *mygo.Window // the run log, in its own window
+	logs   []string     // xray log lines, newest last, capped
 
 	upSpeed, downSpeed string // per-second rates shown in the header
 }
@@ -32,6 +34,33 @@ func (a *app) addLog(line string) {
 		if len(a.logs) > maxLogLines {
 			a.logs = a.logs[len(a.logs)-maxLogLines:]
 		}
+	})
+	if a.logWin != nil && !a.logWin.IsDestroyed() {
+		a.logWin.Update(func() {}) // invalidate the log window
+	}
+}
+
+// toggleLogWindow opens the log window, or brings it back to the front.
+func (a *app) toggleLogWindow() {
+	if a.logWin != nil && !a.logWin.IsDestroyed() {
+		a.logWin.Show()
+		return
+	}
+	a.logWin = mygo.NewWindow(mygo.WindowOptions{
+		Title: "Sun Ray 运行日志",
+		Width: 660, Height: 440,
+		Content: ui.View(a.logView),
+	})
+	a.logWin.OnClosed(func() { a.logWin = nil })
+}
+
+// logView is the content of the log window: nothing but the log itself.
+func (a *app) logView(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Fill().Padding(10, 12).Children(func() {
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted)
+		})
 	})
 }
 
@@ -94,7 +123,7 @@ func (a *app) view(c *ui.Context) {
 	running := a.core.Running()
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
-		// Header: title, live speeds, status, start/stop.
+		// Header: title, live speeds, status, log window, start/stop.
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Sun Ray").FontSize(18).Bold().Grow(1)
 			if running {
@@ -108,6 +137,9 @@ func (a *app) view(c *ui.Context) {
 				if ui.PrimaryButton(c.Key("start"), "启动").Clicked() {
 					a.start()
 				}
+			}
+			if ui.Button(c.Key("logwin"), "日志").Clicked() {
+				a.toggleLogWindow()
 			}
 		})
 
@@ -135,13 +167,14 @@ func (a *app) view(c *ui.Context) {
 					ui.Checkbox(c, &cfg.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
 					ui.Checkbox(c, &cfg.RouteAds, "屏蔽广告（geosite:category-ads-all）")
 				})
-				// Right: outbound protocol and its parameters.
+				// Right: the active protocol spec drives which fields appear.
 				ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 					ui.Text(c, "出站（服务器）").Bold()
 					ui.Field(c, "协议", func() {
-						ui.Select(c, &cfg.Protocol, protocols)
+						ui.Select(c, &cfg.Protocol, protocolList)
 					})
-					if needsAddress(cfg.Protocol) {
+					sp := spec(cfg.Protocol)
+					if sp.needsAddr {
 						ui.Field(c, "地址", func() {
 							ui.TextInput(c, &cfg.Address).Placeholder("example.com")
 						})
@@ -149,26 +182,17 @@ func (a *app) view(c *ui.Context) {
 							ui.TextInput(c, &cfg.Port).Placeholder("443")
 						})
 					}
-					if needsSecret(cfg.Protocol) {
-						ui.Field(c, "UUID / 密码", func() {
+					if sp.needsSecret {
+						ui.Field(c, sp.secretLabel, func() {
 							ui.TextInput(c, &cfg.Secret)
 						})
 					}
-					switch cfg.Protocol {
-					case "shadowsocks":
-						ui.Field(c, "加密方法", func() { ui.TextInput(c, &cfg.Method) })
-					case "socks", "http":
-						ui.Field(c, "用户名（可选）", func() { ui.TextInput(c, &cfg.User) })
-						ui.Field(c, "密码（可选）", func() { ui.TextInput(c, &cfg.Pass) })
-					case "wireguard":
-						ui.Field(c, "本机私钥", func() { ui.TextInput(c, &cfg.Secret) })
-						ui.Field(c, "对端公钥", func() { ui.TextInput(c, &cfg.PeerKey) })
-					case "vless":
-						ui.Field(c, "Flow", func() { ui.Select(c, &cfg.Flow, flows) })
+					for _, f := range sp.fields {
+						renderField(c, f, cfg)
 					}
 
 					// Transport and security apply to the TCP-family protocols.
-					if streamCapable(cfg.Protocol) {
+					if sp.stream {
 						ui.Text(c, "传输层").Bold()
 						ui.Field(c, "传输", func() { ui.Select(c, &cfg.Network, networks) })
 						switch cfg.Network {
@@ -202,22 +226,28 @@ func (a *app) view(c *ui.Context) {
 				})
 			})
 		})
-
-		// Log pane fed by xray in-process log handler.
-		ui.Text(c, "运行日志").Bold()
-		ui.Scroll(c).Height(170).Children(func() {
-			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted)
-		})
 	})
+}
+
+// renderField draws one fieldSpec: text input, select or checkbox.
+func renderField(c *ui.Context, f fieldSpec, cfg *guiConfig) {
+	switch {
+	case f.options != nil:
+		ui.Field(c, f.label, func() { ui.Select(c, f.bindString(cfg), f.options) })
+	case f.bindBool != nil:
+		ui.Checkbox(c, f.bindBool(cfg), f.label)
+	default:
+		ui.Field(c, f.label, func() { ui.TextInput(c, f.bindString(cfg)).Placeholder(f.placeholder) })
+	}
 }
 
 func main() {
 	a := &app{cfg: defaultConfig()}
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:  "Sun Ray",
-			Width:  900, Height: 700,
-			MinWidth: 720, MinHeight: 560,
+			Title: "Sun Ray",
+			Width: 900, Height: 640,
+			MinWidth: 720, MinHeight: 520,
 			Content: ui.View(a.view),
 		})
 		go a.pollTraffic()

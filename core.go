@@ -4,6 +4,7 @@ package main
 // are one single binary, talking through function calls — no subprocess, no
 // command line. Start/stop call core.Instance directly, logs come through
 // log.RegisterHandler, traffic counters through the stats manager.
+// Protocol-specific config building lives in protocols.go.
 
 import (
 	"bytes"
@@ -17,50 +18,11 @@ import (
 	"github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/stats"
-	_ "github.com/xtls/xray-core/main/distro/all" // register every protocol and feature
 	"github.com/xtls/xray-core/infra/conf/serial"
+	_ "github.com/xtls/xray-core/main/distro/all" // register every protocol and feature
 )
 
-// Every outbound protocol xray-core registers in this build (see
-// infra/conf/xray.go outboundConfigLoader).
-var protocols = []string{
-	"vless", "vmess", "trojan", "shadowsocks", "socks", "http",
-	"wireguard", "hysteria", "masque", "freedom", "blackhole", "dns", "loopback",
-}
-
-var logLevels = []string{"debug", "info", "warning", "error"}
-var networks = []string{"tcp", "ws", "grpc", "httpupgrade"}
-var securities = []string{"none", "tls", "reality"}
-var flows = []string{"", "xtls-rprx-vision"}
-
-// needsAddress reports whether the protocol connects to a remote server.
-func needsAddress(p string) bool {
-	switch p {
-	case "freedom", "blackhole", "dns", "loopback":
-		return false
-	}
-	return true
-}
-
-// needsSecret reports whether the protocol takes a UUID / password / key.
-func needsSecret(p string) bool {
-	switch p {
-	case "vless", "vmess", "trojan", "shadowsocks", "hysteria", "masque":
-		return true
-	}
-	return false
-}
-
-// streamCapable reports whether streamSettings (transport + security) apply.
-func streamCapable(p string) bool {
-	switch p {
-	case "vless", "vmess", "trojan", "shadowsocks", "socks", "http":
-		return true
-	}
-	return false
-}
-
-// guiConfig is everything the UI edits.
+// guiConfig is everything the UI edits; protocolSpec binds into it.
 type guiConfig struct {
 	LogLevel string
 	Sniffing bool // sniff inbound connection domains, needed for domain routing
@@ -72,7 +34,7 @@ type guiConfig struct {
 	RouteCN  bool // direct traffic to mainland China sites/IPs
 	RouteAds bool // block ad domains
 
-	Protocol string // see protocols
+	Protocol string // key into protocolRegistry
 	Address  string // server address
 	Port     string // server port
 	Secret   string // UUID / password / auth / secretKey
@@ -80,6 +42,7 @@ type guiConfig struct {
 	User     string // socks / http outbound user
 	Pass     string // socks / http outbound password
 	PeerKey  string // wireguard peer public key
+	Flow     string // vless flow, "" or xtls-rprx-vision
 
 	Network string // transport: tcp, ws, grpc, httpupgrade
 	Path    string // ws / httpupgrade path
@@ -94,7 +57,6 @@ type guiConfig struct {
 	PublicKey     string // reality
 	ShortID       string // reality
 	SpiderX       string // reality
-	Flow          string // vless only: "" or xtls-rprx-vision
 }
 
 func defaultConfig() guiConfig {
@@ -149,10 +111,10 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 	}
 
 	cfg := map[string]any{
-		"log":      map[string]any{"loglevel": c.LogLevel},
-		"routing":  map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
+		"log":       map[string]any{"loglevel": c.LogLevel},
+		"routing":   map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 		"outbounds": outbounds,
-		"stats":    map[string]any{},
+		"stats":     map[string]any{},
 		"policy": map[string]any{
 			"levels": map[string]any{"0": map[string]any{
 				"statsUserUplink": true, "statsUserDownlink": true,
@@ -177,153 +139,7 @@ func (c *guiConfig) buildJSON() ([]byte, error) {
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
-// buildStream renders streamSettings for the chosen transport and security.
-func (c *guiConfig) buildStream() map[string]any {
-	if !streamCapable(c.Protocol) || (c.Network == "tcp" && c.Security == "none") {
-		return nil
-	}
-	s := map[string]any{"network": c.Network}
-	switch c.Network {
-	case "ws":
-		s["wsSettings"] = map[string]any{"path": c.Path, "headers": map[string]any{"Host": c.Host}}
-	case "grpc":
-		s["grpcSettings"] = map[string]any{"serviceName": c.Service, "authority": c.Host}
-	case "httpupgrade":
-		s["httpupgradeSettings"] = map[string]any{"path": c.Path, "host": c.Host}
-	}
-	switch c.Security {
-	case "tls":
-		sni := c.SNI
-		if sni == "" {
-			sni = c.Address
-		}
-		tls := map[string]any{"serverName": sni, "allowInsecure": c.AllowInsecure}
-		if c.ALPN != "" {
-			tls["alpn"] = strings.Split(c.ALPN, ",")
-		}
-		if c.Fingerprint != "" {
-			tls["fingerprint"] = c.Fingerprint
-		}
-		s["security"] = "tls"
-		s["tlsSettings"] = tls
-	case "reality":
-		sni := c.SNI
-		if sni == "" {
-			sni = c.Address
-		}
-		s["security"] = "reality"
-		s["realitySettings"] = map[string]any{
-			"show": true, "serverName": sni, "publicKey": c.PublicKey,
-			"shortId": c.ShortID, "spiderX": c.SpiderX, "fingerprint": c.Fingerprint,
-		}
-	}
-	return s
-}
 
-func (c *guiConfig) buildOutbound() (map[string]any, error) {
-	o := map[string]any{"tag": "proxy"}
-
-	// Protocols without a remote server.
-	switch c.Protocol {
-	case "freedom":
-		o["protocol"] = "freedom"
-		o["settings"] = map[string]any{}
-		return o, nil
-	case "blackhole":
-		o["protocol"] = "blackhole"
-		o["settings"] = map[string]any{}
-		return o, nil
-	case "dns":
-		o["protocol"] = "dns"
-		o["settings"] = map[string]any{}
-		return o, nil
-	case "loopback":
-		o["protocol"] = "loopback"
-		o["settings"] = map[string]any{"inboundTag": "socks-in"}
-		return o, nil
-	}
-
-	serverPort, err := strconv.Atoi(c.Port)
-	if err != nil || serverPort < 1 || serverPort > 65535 {
-		return nil, fmt.Errorf("服务器端口无效: %q", c.Port)
-	}
-	if strings.TrimSpace(c.Address) == "" {
-		return nil, errors.New("服务器地址不能为空")
-	}
-	if needsSecret(c.Protocol) && strings.TrimSpace(c.Secret) == "" {
-		return nil, errors.New("UUID / 密码不能为空")
-	}
-
-	switch c.Protocol {
-	case "vless":
-		o["protocol"] = "vless"
-		user := map[string]any{"id": c.Secret, "encryption": "none", "level": 8}
-		if c.Flow != "" {
-			user["flow"] = c.Flow
-		}
-		o["settings"] = map[string]any{"vnext": []any{map[string]any{
-			"address": c.Address, "port": serverPort, "users": []any{user},
-		}}}
-	case "vmess":
-		o["protocol"] = "vmess"
-		o["settings"] = map[string]any{"vnext": []any{map[string]any{
-			"address": c.Address, "port": serverPort,
-			"users": []any{map[string]any{"id": c.Secret, "security": "auto", "alterId": 0, "level": 8}},
-		}}}
-	case "trojan":
-		o["protocol"] = "trojan"
-		o["settings"] = map[string]any{"servers": []any{map[string]any{
-			"address": c.Address, "port": serverPort, "password": c.Secret, "level": 8,
-		}}}
-	case "shadowsocks":
-		o["protocol"] = "shadowsocks"
-		o["settings"] = map[string]any{"servers": []any{map[string]any{
-			"address": c.Address, "port": serverPort,
-			"method": c.Method, "password": c.Secret, "level": 8,
-		}}}
-	case "socks", "http":
-		o["protocol"] = c.Protocol
-		server := map[string]any{"address": c.Address, "port": serverPort}
-		if c.User != "" {
-			server["users"] = []any{map[string]any{"user": c.User, "pass": c.Pass, "level": 8}}
-		}
-		o["settings"] = map[string]any{"servers": []any{server}}
-	case "wireguard":
-		if strings.TrimSpace(c.PeerKey) == "" {
-			return nil, errors.New("WireGuard 对端公钥不能为空")
-		}
-		o["protocol"] = "wireguard"
-		o["settings"] = map[string]any{
-			"secretKey": c.Secret,
-			"address":   []string{"172.16.0.2/32"},
-			"peers": []any{map[string]any{
-				"publicKey": c.PeerKey,
-				"endpoint":  fmt.Sprintf("%s:%d", c.Address, serverPort),
-			}},
-			"mtu": 1420,
-		}
-	case "hysteria":
-		o["protocol"] = "hysteria"
-		o["settings"] = map[string]any{
-			"version": 2, "address": c.Address, "port": serverPort,
-			"users": []any{map[string]any{"auth": c.Secret, "level": 8}},
-		}
-	case "masque":
-		o["protocol"] = "masque"
-		settings := map[string]any{"address": c.Address, "port": serverPort}
-		if c.Secret != "" {
-			settings["users"] = []any{map[string]any{"pass": c.Secret, "level": 8}}
-		}
-		o["settings"] = settings
-	default:
-		return nil, fmt.Errorf("不支持的协议: %q", c.Protocol)
-	}
-
-	if st := c.buildStream(); st != nil {
-		o["streamSettings"] = st
-	}
-	return o, nil
-}
 // guiHandler turns xray log messages into lines for the UI.
 type guiHandler struct{ fn func(string) }
 
