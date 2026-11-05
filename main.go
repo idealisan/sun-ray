@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -853,9 +854,14 @@ func (a *app) setUpTray() {
 
 func main() {
 	// Keep the resident size in check: the core and the UI together do not
-	// need much, and a tighter heap costs a little CPU.
-	debug.SetGCPercent(50)
-	debug.SetMemoryLimit(256 << 20)
+	// need much, and a tighter heap costs a little CPU. GOMEMLIMIT and GOGC
+	// in the environment win, so the user can tune the footprint.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(256 << 20)
+	}
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
 	a.lastConfig = a.configFingerprint()
