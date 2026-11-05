@@ -222,11 +222,11 @@ func (a *app) serverListTab(c *ui.Context) {
 		})
 
 		cols := []ui.TableColumn{
+			{Title: "当前", ID: "active", Width: 60, Align: ui.Center},
 			{Title: "名称", ID: "name", Sortable: true},
 			{Title: "协议", ID: "protocol", Width: 100, Sortable: true},
 			{Title: "地址", ID: "address", Sortable: true},
 			{Title: "端口", ID: "port", Width: 80, Align: ui.End, Sortable: true},
-			{Title: "当前", ID: "active", Width: 60, Align: ui.Center},
 			{Title: "延迟", ID: "latency", Width: 90, Align: ui.End},
 			{Title: "速度", ID: "speed", Width: 110, Align: ui.End},
 		}
@@ -236,17 +236,17 @@ func (a *app) serverListTab(c *ui.Context) {
 			cell := ui.Box(c).FillWidth().Children(func() {
 				switch col {
 				case 0:
-					ui.Text(c, s.displayName()).SingleLine()
-				case 1:
-					ui.Text(c, s.Protocol)
-				case 2:
-					ui.Text(c, s.Address).SingleLine()
-				case 3:
-					ui.Text(c, s.Port)
-				case 4:
 					if s.ID == a.cfg.ActiveID {
-						ui.Text(c, "●").TextColor(t.Accent)
+						ui.Text(c, "✓").TextColor(t.Accent)
 					}
+				case 1:
+					ui.Text(c, s.displayName()).SingleLine()
+				case 2:
+					ui.Text(c, s.Protocol)
+				case 3:
+					ui.Text(c, s.Address).SingleLine()
+				case 4:
+					ui.Text(c, s.Port)
 				case 5:
 					st := a.testStateOf(s.ID)
 					switch {
