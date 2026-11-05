@@ -267,7 +267,7 @@ func (x *xrayCore) Running() bool {
 
 // Start builds and starts a core instance in this process. onLog receives
 // xray log lines on arbitrary goroutines; it should hop to the UI thread.
-func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) error {
+func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) (err error) {
 	x.mu.Lock()
 	if x.instance != nil {
 		x.mu.Unlock()
@@ -275,7 +275,20 @@ func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) error {
 	}
 	x.mu.Unlock()
 
-	inst, err := startInstance(cfgJSON)
+	// Some of the core's dependencies panic when they cannot do their work,
+	// the TUN interface without the rights for one. Such a panic must not
+	// take the app with it, so it becomes an error here.
+	var inst *core.Instance
+	defer func() {
+		if r := recover(); r != nil {
+			if inst != nil {
+				_ = inst.Close()
+			}
+			err = fmt.Errorf("内核启动时出错: %v", r)
+		}
+	}()
+
+	inst, err = startInstance(cfgJSON)
 	if err != nil {
 		return err
 	}

@@ -226,6 +226,12 @@ func (a *app) start() {
 		a.addLog("[sun-ray] 没有可用的服务器")
 		return
 	}
+	if a.cfg.Global.TunEnabled {
+		if msg := tunPrivilegeError(); msg != "" {
+			a.addLog("[sun-ray] " + msg)
+			return
+		}
+	}
 	cfgJSON, err := s.buildJSON(&a.cfg.Global)
 	if err != nil {
 		a.addLog("[sun-ray] " + err.Error())
