@@ -21,7 +21,7 @@ const (
 // tunInbound renders the TUN inbound for the given settings. The
 // routes send the traffic into the interface, and xray keeps its own
 // connections out of it, so the proxy does not loop into itself.
-func tunInbound(g globalConfig) map[string]any {
+func tunInbound(g *globalConfig) map[string]any {
 	name := strings.TrimSpace(g.TunName)
 	if name == "" {
 		name = defaultTunName
