@@ -29,7 +29,6 @@ import (
 type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
-	Sniffing   bool   `json:"sniffing"`   // sniff connection domains, needed for domain routing
 
 	LogLevel string `json:"logLevel"`
 	RouteCN  bool   `json:"routeCN"`  // direct traffic to mainland China sites/IPs
@@ -94,7 +93,7 @@ type serverResult struct {
 }
 
 func defaultGlobalConfig() globalConfig {
-	return globalConfig{ListenPort: "10808", Sniffing: true, LogLevel: "info"}
+	return globalConfig{ListenPort: "10808", LogLevel: "info"}
 }
 
 func defaultServerConfig() serverConfig {
@@ -173,9 +172,17 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 		)
 	}
 
-	sniffing := map[string]any{"enabled": false, "destOverride": []string{"http", "tls"}}
-	if g.Sniffing {
-		sniffing["enabled"] = true
+	// Sniffing is always on: without it the domain routing rules
+	// (geosite) have nothing to match on. routeOnly keeps the sniffed
+	// domain for routing alone and never rewrites the destination, and
+	// metadataOnly avoids waiting for the whole handshake, so the
+	// connection keeps its original address and the added delay stays
+	// negligible.
+	sniffing := map[string]any{
+		"enabled":      true,
+		"destOverride": []string{"http", "tls", "quic"},
+		"metadataOnly": true,
+		"routeOnly":    true,
 	}
 
 	cfg := map[string]any{

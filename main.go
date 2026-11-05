@@ -180,7 +180,6 @@ func (a *app) globalTab(c *ui.Context) {
 				ui.TextInput(c, &g.ListenPort).Placeholder("10808")
 			})
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
-			ui.Checkbox(c, &g.Sniffing, "流量嗅探（域名分流需要）")
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "日志").Bold()

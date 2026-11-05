@@ -287,7 +287,7 @@ func (a *app) measureServer(s serverConfig) (time.Duration, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	g := &globalConfig{ListenPort: tempPortString(port), Sniffing: false, LogLevel: "info"}
+	g := &globalConfig{ListenPort: tempPortString(port), LogLevel: "info"}
 	data, err := s.buildJSON(g)
 	if err != nil {
 		return 0, 0, err
