@@ -865,10 +865,10 @@ func main() {
 	}
 	// The software rasterizer uses much less memory than the GPU, which the
 	// patched mygo asks for when MYGO_WARP is set.
+	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	if a.cfg.Global.SoftRender {
 		os.Setenv("MYGO_WARP", "1")
 	}
-	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
 	a.lastConfig = a.configFingerprint()
 	mygo.App.SetLocale("zh-Hans")
