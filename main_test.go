@@ -34,6 +34,54 @@ func TestViewServerList(t *testing.T) {
 	}
 }
 
+// A row click chooses a server; a click on the blank part of the list, a
+// toolbar label or another tab clears the choice.
+func TestServerListSelectionClears(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
+	a.cfg.Servers[0].Name = "test-server"
+	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
+	tt := ui.NewTester(a.view, 880, 620)
+
+	choose := func() {
+		t.Helper()
+		if err := tt.Click("test-server"); err != nil {
+			t.Fatal(err)
+		}
+		if a.cursor != 0 || a.chosen.Len() != 1 {
+			t.Fatalf("after a row click: cursor %d, chosen %d", a.cursor, a.chosen.Len())
+		}
+	}
+	cleared := func(what string) {
+		t.Helper()
+		if a.cursor != -1 || a.chosen.Len() != 0 {
+			t.Fatalf("after %s: cursor %d, chosen %d", what, a.cursor, a.chosen.Len())
+		}
+	}
+
+	choose()
+	row, ok := tt.Find("test-server")
+	if !ok {
+		t.Fatal("the server row is missing")
+	}
+	tt.ClickAt(440, row.Y+120) // below the only row
+	cleared("a blank list click")
+
+	choose()
+	if err := tt.Click("共 1 个"); err != nil {
+		t.Fatal(err)
+	}
+	cleared("a toolbar click")
+
+	choose()
+	if err := tt.Click("全局"); err != nil {
+		t.Fatal(err)
+	}
+	if a.tab != tabGlobal {
+		t.Fatalf("after clicking the global tab: tab %d", a.tab)
+	}
+	cleared("a tab click")
+}
+
 // The protocol form reused by the editor windows renders its fields.
 func TestServerForm(t *testing.T) {
 	a := &app{}

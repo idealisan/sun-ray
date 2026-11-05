@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -73,11 +74,14 @@ type app struct {
 	tempCore atomic.Bool // a temporary core (speed test) is running
 
 	// Server list state.
-	list     ui.ListState
-	chosen   ui.Selection[string] // selected server ids, for batch actions
-	cursor   int                  // row the keyboard acts on, -1 for none
-	sort     ui.SortOrder
-	lastSort ui.SortOrder
+	list           ui.ListState
+	chosen         ui.Selection[string] // selected server ids, for batch actions
+	cursor         int                  // row the keyboard acts on, -1 for none
+	sort           ui.SortOrder
+	lastSort       ui.SortOrder
+	listCells      []ui.Handle // rows in the last server list build
+	listCellN      int         // rows bound in listCells this frame
+	clearSelection bool        // a click outside the rows clears the choice
 }
 
 // syncEnvProxy sets the proxy environment variables for the user. Windows
@@ -465,7 +469,36 @@ func (a *app) view(c *ui.Context) {
 		case tabLog:
 			a.logTab(c)
 		}
+		if a.tab != tabServer {
+			a.listCellN = 0
+		}
+
+		// A click anywhere outside a server row clears the choice, after
+		// the widgets have handled it: a toolbar button still acts on the
+		// selection it was clicked with.
+		if a.clearSelection {
+			a.clearSelection = false
+			a.chosen.Clear()
+			a.cursor = -1
+		}
+	}).HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Kind == ui.InputPointerDown && ev.Button == 0 && !a.pointerOverListRow(c, ev.X, ev.Y) {
+			a.clearSelection = true
+		}
+		return false
 	})
+}
+
+// pointerOverListRow reports whether the point is over a row of the
+// server list, as the last frame built it.
+func (a *app) pointerOverListRow(c *ui.Context, x, y float32) bool {
+	for i := 0; i < a.listCellN; i++ {
+		r := a.listCells[i].Bounds(c)
+		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+			return true
+		}
+	}
+	return false
 }
 
 // globalTab: inbound ports, sniffing, log level and routing presets.
@@ -553,6 +586,7 @@ func (a *app) tunWarning() string {
 func (a *app) serverListTab(c *ui.Context) {
 	t := c.Theme()
 	a.applySort()
+	a.listCellN = 0
 	a.list.Key = func(row int) any { return a.cfg.Servers[row].ID }
 	a.list.Selection = &a.chosen
 	a.list.Selected = &a.cursor
@@ -656,6 +690,11 @@ func (a *app) serverListTab(c *ui.Context) {
 			if cell.RowDoubleClicked() {
 				dbl = row
 			}
+			if a.listCellN == len(a.listCells) {
+				a.listCells = append(a.listCells, ui.Handle{})
+			}
+			cell.Bind(&a.listCells[a.listCellN])
+			a.listCellN++
 		}).Grow(1)
 
 		switch {
