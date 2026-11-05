@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -232,5 +233,40 @@ func TestCoreStartStop(t *testing.T) {
 	a.updateTrayMenu()
 	if a.trayToggle.Label != "启动" {
 		t.Errorf("tray label while stopped = %q, want 启动", a.trayToggle.Label)
+	}
+}
+
+func TestAppendLogLineCapsChars(t *testing.T) {
+	logs, chars := appendLogLine(nil, 0, "hello", 10)
+	logs, chars = appendLogLine(logs, chars, "world", 10)
+	if got := strings.Join(logs, "\n"); got != "world" {
+		t.Fatalf("log = %q, want %q", got, "world")
+	}
+	if chars != len("world") {
+		t.Fatalf("chars = %d, want %d", chars, len("world"))
+	}
+
+	logs, chars = appendLogLine(nil, 0, strings.Repeat("x", 20), 10)
+	if got := strings.Join(logs, "\n"); got != strings.Repeat("x", 10) {
+		t.Fatalf("single long line = %q", got)
+	}
+	if chars != 10 {
+		t.Fatalf("chars = %d, want 10", chars)
+	}
+
+	logs, chars = appendLogLine(nil, 0, strings.Repeat("日", 20), 10)
+	got := strings.Join(logs, "\n")
+	if !utf8.ValidString(got) {
+		t.Fatalf("trimmed log is not valid UTF-8: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != 10 || chars != n {
+		t.Fatalf("runes = %d, chars = %d, want 10", n, chars)
+	}
+
+	for i := 0; i < 100; i++ {
+		logs, chars = appendLogLine(logs, chars, strings.Repeat("a", 7), 50)
+	}
+	if got := strings.Join(logs, "\n"); utf8.RuneCountInString(got) > 50 || chars != utf8.RuneCountInString(got) {
+		t.Fatalf("log runes = %d, chars = %d, want <= 50", utf8.RuneCountInString(got), chars)
 	}
 }

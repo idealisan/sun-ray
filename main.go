@@ -19,12 +19,15 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-const maxLogLines = 300
+// maxLogChars bounds the run log. The log is a debugging aid, so keeping the
+// newest 500K characters is plenty and avoids growing without limit.
+const maxLogChars = 500_000
 
 // restartDelay is how long the app waits for the settings to settle before
 // it restarts a running core.
@@ -58,7 +61,8 @@ type app struct {
 	tunWarningText string                // why the TUN interface cannot be created
 	testing        bool                  // a measurement run is in progress
 
-	logs []string // xray log lines, newest last, capped
+	logs     []string // xray log lines, newest last
+	logChars int      // total rune count of logs when joined with newlines
 
 	upSpeed, downSpeed string // per-second rates shown in the header
 
@@ -194,10 +198,12 @@ func (a *app) watchConfig() {
 func (a *app) restartCore() {
 	a.stop()
 	a.start()
-} // logVersion writes the version as the first line of the log.
+}
+
+// logVersion writes the version as the first line of the log.
 func (a *app) logVersion() {
 	a.win.Update(func() {
-		a.logs = append(a.logs, "Sun Ray "+versionString())
+		a.logs, a.logChars = appendLogLine(a.logs, a.logChars, "Sun Ray "+versionString(), maxLogChars)
 	})
 }
 
@@ -209,11 +215,39 @@ func (a *app) addLog(line string) {
 		source = "[测速] "
 	}
 	a.win.Update(func() {
-		a.logs = append(a.logs, source+line)
-		if len(a.logs) > maxLogLines {
-			a.logs = a.logs[len(a.logs)-maxLogLines:]
-		}
+		a.logs, a.logChars = appendLogLine(a.logs, a.logChars, source+line, maxLogChars)
 	})
+}
+
+// appendLogLine appends line and drops the oldest lines until the joined log
+// fits within limit characters. It returns the new log and its character count.
+func appendLogLine(logs []string, chars int, line string, limit int) ([]string, int) {
+	if len(logs) > 0 {
+		chars++ // newline between the previous line and this one
+	}
+	logs = append(logs, line)
+	chars += utf8.RuneCountInString(line)
+
+	for chars > limit && len(logs) > 1 {
+		chars -= utf8.RuneCountInString(logs[0]) + 1
+		logs[0] = "" // release the dropped line for the garbage collector
+		logs = logs[1:]
+	}
+	if chars > limit {
+		// A single line is longer than the whole budget; keep its tail.
+		runes := []rune(logs[0])
+		if len(runes) > limit {
+			runes = runes[len(runes)-limit:]
+		}
+		logs[0] = string(runes)
+		chars = len(runes)
+	}
+	if cap(logs) > 2*len(logs)+64 {
+		compact := make([]string, len(logs))
+		copy(compact, logs)
+		logs = compact
+	}
+	return logs, chars
 }
 
 // start validates the active server, builds the config and boots the
@@ -835,6 +869,7 @@ func (a *app) logTab(c *ui.Context) {
 					m.Separator()
 					if m.Item("清空日志").Chosen() {
 						a.logs = nil
+						a.logChars = 0
 					}
 				})
 		})
