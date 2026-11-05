@@ -29,7 +29,7 @@ import (
 
 func main() {
 	var (
-		configPath  = flag.String("config", "", "the config file to run (default: sunray.json in the home directory)")
+		configFile  = flag.String("config", "", "the config file to run (default: sunray.json in the home directory)")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		test        = flag.Bool("test", false, "measure the server latency and speed, then exit")
 	)
