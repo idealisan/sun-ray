@@ -82,6 +82,22 @@ jobs:
             dist/darwin-arm64/*.dmg
           if-no-files-found: error
 
+  # The size each part contributes: the UI framework, the core, or both.
+  size-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build the app and the probes
+        run: bash scripts/size-report.sh
+
   # On a v* tag push, create a GitHub Release and attach all binaries.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
