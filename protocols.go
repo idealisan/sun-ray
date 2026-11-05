@@ -234,6 +234,7 @@ func init() {
 	protocolRegistry["masque"] = protocolSpec{
 		name: "masque", needsAddr: true, tlsOnly: true,
 		fields: []fieldSpec{
+			textField("用户名（可选）", "", func(c *serverConfig) *string { return &c.User }),
 			textField("远程 DNS（逗号分隔，可选）", "8.8.8.8,1.1.1.1", func(c *serverConfig) *string { return &c.RemoteDNS }),
 		},
 		build: func(c *serverConfig, port int) (map[string]any, error) {
@@ -336,6 +337,9 @@ func (c *serverConfig) buildStreamQUIC() map[string]any {
 	case "masque":
 		s["network"] = "masque"
 		ms := map[string]any{}
+		if c.User != "" {
+			ms["user"] = c.User
+		}
 		if c.Secret != "" {
 			ms["pass"] = c.Secret
 		}
