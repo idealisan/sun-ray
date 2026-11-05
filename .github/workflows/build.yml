@@ -31,6 +31,9 @@ jobs:
       - name: Apply embedded-assets patch to xray-core
         run: git -C xray-core apply --whitespace=nowarn ../patches/xray-core-embedded-assets.patch
 
+      - name: Apply the WARP patch to mygo
+        run: git -C mygo apply --whitespace=nowarn ../patches/mygo-force-warp.patch
+
       - uses: actions/setup-go@v5
         with:
           go-version: stable
