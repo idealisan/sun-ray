@@ -8,9 +8,13 @@
 | `protocols.go` | 协议注册表：每个出站协议的 UI 字段与 settings 构建 |
 | `main.go` | MyGo 原生 UI：主窗口、服务器列表、编辑器窗口 |
 | `persistence.go` | `~/sunray.json` 的读写与防抖保存 |
+| `tun.go` | TUN 入站、接口名选择、权限检查 |
+| `tun_helper*.go` | 特权 helper 的启动、控制协议与平台授权 |
 | `assets.go` | 内嵌 geo 资产 |
 
 新增出站协议时，只在 `protocols.go` 的 `protocolRegistry` 里加一项；UI 与配置构建不需要改动。
+
+TUN 模式不要求 GUI 以 root 运行：`main.go` 和 `nogui_main.go` 在入口先调用 `runTunHelperIfRequested()`，同一个二进制以 `-tun-helper` 进入特权分支。helper 只运行「TUN 入站 → `127.0.0.1` SOCKS 出站」，不读取服务器密钥；主进程用 `sockopt.interface` 把代理/直连出站绑定到物理网卡，并用 `direct-lo` 与 DNS 直连规则避免回环。
 
 ## 构建与测试
 

@@ -98,7 +98,9 @@ git -C xray-core apply ../patches/xray-core-embedded-assets.patch
 TUN 模式接管**全部**流量，不依赖应用是否支持代理——服务器上跑、或不想逐个设置代理的程序（游戏、某些国产软件、容器）都能走代理。
 
 - 全局设置里勾选「启用 TUN」，可调接口名、MTU、网关地址、是否连 IPv6 一起接管
-- 需要**管理员/root 权限**：Linux 需要 `/dev/net/tun` 与 `CAP_NET_ADMIN`，Windows 需要管理员，macOS 需要 root。权限不足时界面会直接提示
+- **主界面不需要以管理员身份运行**：启动 TUN 时，同一个可执行文件会以隐藏参数 `-tun-helper` 启动一个临时特权进程，由系统弹出授权框（macOS 用 `osascript`，Linux 用 `pkexec`/polkit，Windows 用 UAC）。取消授权就回到普通模式
+- 特权 helper 只运行「TUN 入站 → `127.0.0.1` SOCKS 出站」，**不读取服务器地址、UUID、密码**；主进程把代理和直连出站绑定到物理网卡（`sockopt.interface`），所以不会自己绕回 TUN
+- 只改服务器、路由、日志等设置时 helper 保持运行，只重启主内核；改 TUN 接口名、MTU、网关、IPv6 或监听端口时才重新请求授权
 - 开启 TUN 后**不再修改系统代理**（TUN 已接管全部流量），本地 SOCKS/HTTP 端口仍然保留，方便排查
 - xray 会用自己的出站接口避开 TUN（`autoOutboundsInterface`），不会把自己绕进死循环
 - **不做系统 DNS 接管**（`autoSystemDnsToGateway`）：它在 Linux 上依赖 systemd-resolved 且条件苛刻，容易出现解析死锁。DNS 查询仍走系统解析器（可能被运营商看到域名）
