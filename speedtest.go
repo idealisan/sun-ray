@@ -214,15 +214,21 @@ func (a *app) testStateOf(id string) *testState {
 // selected. The servers are tested one after another, so they do not
 // compete for bandwidth.
 func (a *app) runTests() {
-	if a.testing {
-		return
-	}
 	ids := a.selectedIDs()
 	if len(ids) == 0 {
 		ids = make([]string, 0, len(a.cfg.Servers))
 		for i := range a.cfg.Servers {
 			ids = append(ids, a.cfg.Servers[i].ID)
 		}
+	}
+	a.runTestsFor(ids)
+}
+
+// runTestsFor measures the given servers, one after another, so they do
+// not compete for bandwidth.
+func (a *app) runTestsFor(ids []string) {
+	if a.testing {
+		return
 	}
 	if len(ids) == 0 {
 		return
@@ -270,11 +276,13 @@ func (a *app) measureServer(s serverConfig) (time.Duration, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	g := &globalConfig{ListenPort: tempPortString(port), Sniffing: false, LogLevel: "warning"}
+	g := &globalConfig{ListenPort: tempPortString(port), Sniffing: false, LogLevel: "info"}
 	data, err := s.buildJSON(g)
 	if err != nil {
 		return 0, 0, err
 	}
+	a.tempCore.Store(true)
+	defer a.tempCore.Store(false)
 	inst, err := startInstance(data)
 	if err != nil {
 		return 0, 0, err

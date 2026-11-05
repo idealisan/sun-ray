@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -43,6 +44,8 @@ type app struct {
 
 	upSpeed, downSpeed string // per-second rates shown in the header
 
+	tempCore atomic.Bool // a temporary core (speed test) is running
+
 	// Server list state.
 	list     ui.ListState
 	chosen   ui.Selection[string] // selected server ids, for batch actions
@@ -52,8 +55,14 @@ type app struct {
 }
 
 func (a *app) addLog(line string) {
+	// Tell the two cores apart: the one the user runs and the temporary
+	// one a speed test starts.
+	source := "[当前] "
+	if a.tempCore.Load() {
+		source = "[测速] "
+	}
 	a.win.Update(func() {
-		a.logs = append(a.logs, line)
+		a.logs = append(a.logs, source+line)
 		if len(a.logs) > maxLogLines {
 			a.logs = a.logs[len(a.logs)-maxLogLines:]
 		}
@@ -268,6 +277,18 @@ func (a *app) serverListTab(c *ui.Context) {
 					}
 				}
 			})
+			cell = cell.ContextMenu(func(m *ui.Menu) {
+				if m.Item("设为当前使用").Chosen() {
+					a.setActive(s.ID)
+				}
+				m.Separator()
+				if m.Item("测试").Chosen() {
+					a.runTestsFor([]string{s.ID})
+				}
+				if m.Item("删除").Chosen() {
+					a.deleteServers(a.deleteTargets(s.ID))
+				}
+			})
 			if cell.RowDoubleClicked() {
 				dbl = row
 			}
@@ -480,23 +501,39 @@ func (a *app) duplicateSelected() {
 }
 
 func (a *app) deleteSelected() {
-	ids := make(map[string]bool, a.chosen.Len())
-	for id := range a.chosen.All() {
-		ids[id] = true
+	a.deleteServers(a.selectedIDs())
+}
+
+// deleteTargets returns the ids a delete action should remove: the whole
+// selection when the row is part of it, otherwise just that row.
+func (a *app) deleteTargets(id string) []string {
+	for sel := range a.chosen.All() {
+		if sel == id {
+			return a.selectedIDs()
+		}
 	}
+	return []string{id}
+}
+
+// deleteServers removes the given servers from the list.
+func (a *app) deleteServers(ids []string) {
 	if len(ids) == 0 {
 		return
 	}
+	drop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		drop[id] = true
+	}
 	kept := a.cfg.Servers[:0]
 	for _, s := range a.cfg.Servers {
-		if !ids[s.ID] {
+		if !drop[s.ID] {
 			kept = append(kept, s)
 		}
 	}
 	a.cfg.Servers = kept
 	a.chosen.Clear()
 	a.cursor = -1
-	if ids[a.cfg.ActiveID] {
+	if drop[a.cfg.ActiveID] {
 		if len(a.cfg.Servers) > 0 {
 			a.cfg.ActiveID = a.cfg.Servers[0].ID
 		} else {
@@ -561,7 +598,15 @@ func (a *app) logTab(c *ui.Context) {
 			}
 		})
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted).Selectable()
+			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted).
+				Selectable().
+				ContextMenu(func(m *ui.Menu) {
+					m.EditItems() // copy and select all, in the app language
+					m.Separator()
+					if m.Item("清空日志").Chosen() {
+						a.logs = nil
+					}
+				})
 		})
 	})
 }
@@ -695,6 +740,7 @@ func (a *app) setUpTray() {
 func main() {
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
+	mygo.App.SetLocale("zh-Hans")
 	mygo.App.SetName("Sun Ray")
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
