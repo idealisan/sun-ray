@@ -251,18 +251,18 @@ func (a *app) serverListTab(c *ui.Context) {
 					st := a.testStateOf(s.ID)
 					switch {
 					case st == nil:
-						ui.Text(c, "-").TextColor(t.TextMuted)
+						ui.Text(c, "-")
 					case st.running:
-						ui.Text(c, "测试中…").TextColor(t.TextMuted)
+						ui.Text(c, "测试中…")
 					case st.failed:
-						ui.Text(c, "失败").TextColor(t.TextMuted)
+						ui.Text(c, "失败")
 					default:
 						ui.Text(c, formatLatency(st.latency))
 					}
 				case 6:
 					st := a.testStateOf(s.ID)
 					if st == nil || st.failed || st.speed <= 0 {
-						ui.Text(c, "-").TextColor(t.TextMuted)
+						ui.Text(c, "-")
 					} else {
 						ui.Text(c, "↓ "+formatSpeed(st.speed))
 					}
