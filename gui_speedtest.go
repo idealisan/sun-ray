@@ -2,6 +2,15 @@
 
 package main
 
+import (
+	"fmt"
+	"net"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/net/proxy"
+)
+
 // testState is the per-server measurement result shown in the list.
 type testState struct {
 	running bool

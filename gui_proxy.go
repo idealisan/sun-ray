@@ -2,6 +2,11 @@
 
 package main
 
+import (
+	"fmt"
+	"time"
+)
+
 // syncSystemProxy applies the system proxy when the mode or the local
 // port changed. It runs from the UI, so it only acts on a change.
 func (a *app) syncSystemProxy(g *globalConfig) {
