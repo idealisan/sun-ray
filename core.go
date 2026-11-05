@@ -220,21 +220,9 @@ func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) error {
 	}
 	x.mu.Unlock()
 
-	pbConf, err := serial.DecodeJSONConfig(bytes.NewReader(cfgJSON))
+	inst, err := startInstance(cfgJSON)
 	if err != nil {
-		return fmt.Errorf("解析配置: %w", err)
-	}
-	coreConf, err := pbConf.Build()
-	if err != nil {
-		return fmt.Errorf("构建配置: %w", err)
-	}
-	inst, err := core.New(coreConf)
-	if err != nil {
-		return fmt.Errorf("创建内核: %w", err)
-	}
-	if err := inst.Start(); err != nil {
-		inst.Close()
-		return fmt.Errorf("启动内核: %w", err)
+		return err
 	}
 	x.mu.Lock()
 	x.instance = inst
@@ -244,6 +232,29 @@ func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) error {
 	// it, so log lines land in the GUI.
 	log.RegisterHandler(&guiHandler{fn: onLog})
 	return nil
+}
+
+// startInstance builds and starts a core instance in this process. The
+// caller owns it and closes it when done; the user instance and the
+// temporary instance used by the speed test both go through here.
+func startInstance(cfgJSON []byte) (*core.Instance, error) {
+	pbConf, err := serial.DecodeJSONConfig(bytes.NewReader(cfgJSON))
+	if err != nil {
+		return nil, fmt.Errorf("解析配置: %w", err)
+	}
+	coreConf, err := pbConf.Build()
+	if err != nil {
+		return nil, fmt.Errorf("构建配置: %w", err)
+	}
+	inst, err := core.New(coreConf)
+	if err != nil {
+		return nil, fmt.Errorf("创建内核: %w", err)
+	}
+	if err := inst.Start(); err != nil {
+		inst.Close()
+		return nil, fmt.Errorf("启动内核: %w", err)
+	}
+	return inst, nil
 }
 
 // Stop closes the instance. Function call, not a kill.

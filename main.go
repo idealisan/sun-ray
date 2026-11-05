@@ -32,10 +32,12 @@ type app struct {
 	core       xrayCore
 	win        *mygo.Window
 	tray       *mygo.Tray
-	trayToggle *mygo.MenuItem // start/stop entry in the tray menu
-	quitting   bool           // a real quit is under way, so closing may proceed
-	tab        int            // selected tab in the main window
-	saver      configSaver    // debounced persistence to ~/sunray.json
+	trayToggle *mygo.MenuItem        // start/stop entry in the tray menu
+	quitting   bool                  // a real quit is under way, so closing may proceed
+	tab        int                   // selected tab in the main window
+	saver      configSaver           // debounced persistence to ~/sunray.json
+	tests      map[string]*testState // per server measurement results
+	testing    bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
 
@@ -213,6 +215,9 @@ func (a *app) serverListTab(c *ui.Context) {
 					a.setActive(id)
 				}
 			}
+			if ui.Button(c.Key("srvtest"), "测试").Disabled(a.testing).Clicked() {
+				a.runTests()
+			}
 			ui.Text(c, fmt.Sprintf("共 %d 个", len(a.cfg.Servers))).TextColor(t.TextMuted).Grow(1)
 		})
 
@@ -222,6 +227,8 @@ func (a *app) serverListTab(c *ui.Context) {
 			{Title: "地址", ID: "address", Sortable: true},
 			{Title: "端口", ID: "port", Width: 80, Align: ui.End, Sortable: true},
 			{Title: "当前", ID: "active", Width: 60, Align: ui.Center},
+			{Title: "延迟", ID: "latency", Width: 90, Align: ui.End},
+			{Title: "速度", ID: "speed", Width: 110, Align: ui.End},
 		}
 		dbl := -1
 		tbl := ui.Table(c, &a.list, cols, len(a.cfg.Servers), func(row, col int) {
@@ -239,6 +246,25 @@ func (a *app) serverListTab(c *ui.Context) {
 				case 4:
 					if s.ID == a.cfg.ActiveID {
 						ui.Text(c, "●").TextColor(t.Accent)
+					}
+				case 5:
+					st := a.testStateOf(s.ID)
+					switch {
+					case st == nil:
+						ui.Text(c, "-").TextColor(t.TextMuted)
+					case st.running:
+						ui.Text(c, "测试中…").TextColor(t.TextMuted)
+					case st.failed:
+						ui.Text(c, "失败").TextColor(t.TextMuted)
+					default:
+						ui.Text(c, formatLatency(st.latency))
+					}
+				case 6:
+					st := a.testStateOf(s.ID)
+					if st == nil || st.failed || st.speed <= 0 {
+						ui.Text(c, "-").TextColor(t.TextMuted)
+					} else {
+						ui.Text(c, "↓ "+formatSpeed(st.speed))
 					}
 				}
 			})
@@ -667,7 +693,7 @@ func (a *app) setUpTray() {
 }
 
 func main() {
-	a := &app{cfg: loadConfig(), cursor: -1}
+	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
 	mygo.App.SetName("Sun Ray")
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })

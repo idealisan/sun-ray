@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/egoist/mygo v0.0.0
 	github.com/xtls/xray-core v0.0.0
+	golang.org/x/net v0.62.0
 )
 
 require (
@@ -45,7 +46,6 @@ require (
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20261020153306-9f2b28d4331a // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/image v0.46.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
