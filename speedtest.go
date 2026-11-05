@@ -17,8 +17,6 @@ import (
 	"time"
 
 	"golang.org/x/net/proxy"
-
-	"github.com/xtls/xray-core/common/log"
 )
 
 const (

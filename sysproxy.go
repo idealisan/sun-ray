@@ -1,9 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"time"
-)
+import ()
 
 // Proxy modes, also the values stored in the config.
 const (

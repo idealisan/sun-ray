@@ -4,11 +4,8 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"sync/atomic"
+	"github.com/xtls/xray-core/common/log"
 	"time"
-
-	"golang.org/x/net/proxy"
 )
 
 // testState is the per-server measurement result shown in the list.
