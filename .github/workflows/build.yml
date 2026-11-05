@@ -85,6 +85,39 @@ jobs:
             dist/darwin-arm64/*.dmg
           if-no-files-found: error
 
+  # The headless build for servers and containers: same core, same config
+  # file, no user interface. Linux only, where nobody logs in anyway.
+  nogui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply embedded-assets patch to xray-core
+        run: git -C xray-core apply --whitespace=nowarn ../patches/xray-core-embedded-assets.patch
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build the headless binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -tags nogui -o "dist/sun-ray-nogui-linux-$arch" .
+          done
+          ls -l dist
+
+      - name: Upload the headless binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: nogui
+          path: dist/sun-ray-nogui-*
+          if-no-files-found: error
+
   # The size each part contributes: the UI framework, the core, or both.
   size-report:
     runs-on: ubuntu-latest

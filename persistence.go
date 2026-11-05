@@ -25,9 +25,13 @@ func configPath() string {
 // loadConfig reads the saved config; missing or broken files fall back to
 // the defaults so the app always starts. Only the current format is read:
 // there is no migration from older, single-server files.
-func loadConfig() appConfig {
+func loadConfig() appConfig { return loadConfigFrom(configPath()) }
+
+// loadConfigFrom reads a config file; a missing or broken file falls back to the
+// defaults.
+func loadConfigFrom(path string) appConfig {
 	cfg := defaultAppConfig()
-	data, err := os.ReadFile(configPath())
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg
 	}

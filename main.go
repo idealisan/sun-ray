@@ -1,3 +1,5 @@
+//go:build !nogui
+
 package main
 
 // Sun Ray: a simple Xray GUI client in native UI. The xray-core library

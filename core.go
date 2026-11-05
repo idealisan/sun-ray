@@ -118,6 +118,28 @@ func defaultAppConfig() appConfig {
 }
 
 // newServerID returns a random id, stable across renames and reorders.
+// activeServerOf returns the server the app runs with: the one marked
+// active, or the first one.
+func activeServerOf(cfg appConfig) *serverConfig {
+	if s, ok := serverByIDOf(cfg, cfg.ActiveID); ok {
+		return s
+	}
+	if len(cfg.Servers) > 0 {
+		return &cfg.Servers[0]
+	}
+	return nil
+}
+
+// serverByIDOf finds a server by its id.
+func serverByIDOf(cfg appConfig, id string) (*serverConfig, bool) {
+	for i := range cfg.Servers {
+		if cfg.Servers[i].ID == id {
+			return &cfg.Servers[i], true
+		}
+	}
+	return nil, false
+}
+
 func newServerID() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
