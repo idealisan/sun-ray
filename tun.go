@@ -6,8 +6,10 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -22,10 +24,7 @@ const (
 // routes send the traffic into the interface, and xray keeps its own
 // connections out of it, so the proxy does not loop into itself.
 func tunInbound(g *globalConfig) map[string]any {
-	name := strings.TrimSpace(g.TunName)
-	if name == "" {
-		name = defaultTunName
-	}
+	name := tunNameFor(g)
 	mtu := int(g.TunMTU)
 	if mtu <= 0 {
 		mtu = defaultTunMTU
@@ -46,8 +45,70 @@ func tunInbound(g *globalConfig) map[string]any {
 			"mtu":                    mtu,
 			"gateway":                []string{gateway},
 			"autoSystemRoutingTable": routes,
+			// Keep xray's own connections on the physical interface, so
+			// they do not re-enter the TUN. Loopback is skipped by xray.
+			"autoOutboundsInterface": "auto",
 		},
 	}
+}
+
+// tunNameFor returns the interface name to create. An explicit name wins;
+// otherwise each platform gets a free name of the form it expects.
+func tunNameFor(g *globalConfig) string {
+	if name := strings.TrimSpace(g.TunName); name != "" {
+		return name
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return freeUtunName()
+	case "linux", "windows":
+		return freeSunrayName()
+	}
+	return defaultTunName
+}
+
+// tunNameHint is the placeholder the settings field shows.
+func tunNameHint() string {
+	if runtime.GOOS == "darwin" {
+		return "utun10"
+	}
+	return defaultTunName
+}
+
+// freeUtunName finds an unused utunN. macOS only accepts that form.
+func freeUtunName() string {
+	used := interfaceNames()
+	for i := 10; i <= 1024; i++ {
+		name := "utun" + strconv.Itoa(i)
+		if !used[name] {
+			return name
+		}
+	}
+	return "utun10"
+}
+
+// freeSunrayName finds an unused sunrayN on Linux and Windows.
+func freeSunrayName() string {
+	used := interfaceNames()
+	for i := 0; i <= 9; i++ {
+		name := "sunray" + strconv.Itoa(i)
+		if !used[name] {
+			return name
+		}
+	}
+	return defaultTunName
+}
+
+func interfaceNames() map[string]bool {
+	used := map[string]bool{}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return used
+	}
+	for _, iface := range ifaces {
+		used[iface.Name] = true
+	}
+	return used
 }
 
 // tunPrivilegeError returns why the TUN interface cannot be created, or

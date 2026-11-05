@@ -381,7 +381,7 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，需要管理员权限）")
 			if g.TunEnabled {
 				ui.Field(c, "接口名", func() {
-					ui.TextInput(c, &g.TunName).Placeholder(defaultTunName)
+					ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
 				})
 				ui.Field(c, "MTU", func() {
 					ui.NumberInput(c, &g.TunMTU, 576, 9000, 100)

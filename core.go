@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,12 @@ type globalConfig struct {
 	TunMTU     float64 `json:"tunMtu"`     // the interface MTU
 	TunGateway string  `json:"tunGateway"` // the interface address
 	TunIPv6    bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
+
+	// Runtime-only TUN helper state. The privileged helper owns the TUN
+	// interface, so the in-process core must keep its own connections out
+	// of it. Neither field is persisted or part of the restart fingerprint.
+	TunHelper          bool   `json:"-"`
+	TunBypassInterface string `json:"-"`
 }
 
 // serverConfig is one entry of the server list; protocolSpec binds into it.
@@ -182,6 +189,23 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 		return nil, err
 	}
 
+	// In helper mode the privileged helper owns the TUN interface and
+	// forwards everything to this core's loopback mixed inbound. Bind the
+	// real outbounds to the physical interface, otherwise they would take
+	// the default route into the TUN and loop back here.
+	helper := g.TunEnabled && g.TunHelper
+	bypass := strings.TrimSpace(g.TunBypassInterface)
+	if helper && bypass == "" {
+		return nil, errors.New("TUN 辅助模式缺少物理网卡")
+	}
+	direct := map[string]any{"protocol": "freedom", "tag": "direct"}
+	if bypass != "" {
+		if !isLoopbackHost(c.Address) {
+			setSockoptInterface(proxy, bypass)
+		}
+		setSockoptInterface(direct, bypass)
+	}
+
 	// Simple routing: private ranges always go direct; presets add more.
 	// Private ranges are spelled out as CIDRs so no geoip.dat asset is needed.
 	rules := []any{
@@ -190,7 +214,17 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 			"169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
 		}, "outboundTag": "direct"},
 	}
-	outbounds := []any{proxy, map[string]any{"protocol": "freedom", "tag": "direct"}}
+	outbounds := []any{proxy, direct}
+	if helper {
+		// Loopback must not go through the interface-bound direct
+		// outbound, and DNS must stay direct or it would recurse through
+		// the proxy while resolving the proxy server itself.
+		rules = append([]any{
+			map[string]any{"type": "field", "ip": []string{"127.0.0.0/8", "::1/128"}, "outboundTag": "direct-lo"},
+			map[string]any{"type": "field", "port": "53", "network": "tcp,udp", "outboundTag": "direct"},
+		}, rules...)
+		outbounds = append(outbounds, map[string]any{"protocol": "freedom", "tag": "direct-lo"})
+	}
 	if g.RouteAds {
 		rules = append(rules, map[string]any{"type": "field", "domain": []string{"geosite:category-ads-all"}, "outboundTag": "block"})
 		outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": "block"})
@@ -223,7 +257,7 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 			"settings": map[string]any{"auth": "noauth", "udp": true},
 		},
 	}
-	if g.TunEnabled {
+	if g.TunEnabled && !helper {
 		inbounds = append(inbounds, tunInbound(g))
 	}
 	cfg := map[string]any{
@@ -243,7 +277,36 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 		"inbounds": inbounds,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
-} // guiHandler turns xray log messages into lines for the UI.
+}
+
+// setSockoptInterface pins an outbound's sockets to a physical interface,
+// so traffic cannot fall back into the TUN helper's default route.
+func setSockoptInterface(outbound map[string]any, iface string) {
+	stream, _ := outbound["streamSettings"].(map[string]any)
+	if stream == nil {
+		stream = map[string]any{}
+		outbound["streamSettings"] = stream
+	}
+	sockopt, _ := stream["sockopt"].(map[string]any)
+	if sockopt == nil {
+		sockopt = map[string]any{}
+		stream["sockopt"] = sockopt
+	}
+	sockopt["interface"] = iface
+}
+
+// isLoopbackHost reports whether a server address is a loopback literal, so
+// a local server does not need (and must not get) the physical interface.
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// guiHandler turns xray log messages into lines for the UI.
 type guiHandler struct{ fn func(string) }
 
 func (h *guiHandler) Handle(msg log.Message) {
