@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -223,4 +224,34 @@ func sockoptInterface(outbound map[string]any) string {
 	sockopt, _ := stream["sockopt"].(map[string]any)
 	iface, _ := sockopt["interface"].(string)
 	return iface
+}
+
+// The helper-mode main config must be accepted by xray: no TUN inbound,
+// interface-bound outbounds, and the loopback/DNS rules.
+func TestStartHelperModeCore(t *testing.T) {
+	iface, err := defaultRouteInterface()
+	if err != nil {
+		t.Skipf("no default route: %v", err)
+	}
+	port, err := freeLoopbackPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := defaultServerConfig()
+	c.Protocol = "freedom"
+	c.Address = "example.com"
+	g := defaultGlobalConfig()
+	g.ListenPort = strconv.Itoa(port)
+	g.TunEnabled = true
+	g.TunHelper = true
+	g.TunBypassInterface = iface
+	data, err := c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := startInstance(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Close()
 }
