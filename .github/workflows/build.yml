@@ -87,6 +87,27 @@ jobs:
             sun-ray-*
           if-no-files-found: error
 
+  # End-to-end protocol tests: a local xray-core server per protocol, the
+  # headless Sun Ray binary as the client, and curl through the mixed inbound.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply embedded-assets patch to xray-core
+        run: git -C xray-core apply --whitespace=nowarn ../patches/xray-core-embedded-assets.patch
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Integration tests
+        timeout-minutes: 15
+        run: go test -tags integration -count=1 -v -timeout 10m ./integration
+
   # The headless build for servers and containers: same core, same config
   # file, no user interface. Linux only, where nobody logs in anyway.
   nogui:

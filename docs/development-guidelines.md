@@ -22,6 +22,14 @@ go test ./...
 
 提交前至少跑一遍 `gofmt -w *.go`、`go vet ./...`、`go test ./...`。
 
+按协议的端到端测试在 `integration/`，用 `integration` build tag 隔离：
+
+```bash
+go test -tags integration -count=1 -v -timeout 10m ./integration
+```
+
+它会构建 `-tags nogui` 的无界面二进制，在本机为每个协议启动一个 xray-core 上游，再用 `curl` 通过混合入站访问本地 HTTP origin。上游统一用 freedom 的 `redirect` 指到 origin，所以不需要公网。无界面进程用 `-test-mode` 启动，打印 `SUNRAY_READY host:port` 后等待信号。新增协议时在 `integration/integration_test.go` 的用例表里加一项即可。
+
 macOS 的 `.app` 用 MyGo 的打包命令生成，配置在 `mygo.json`：
 
 ```bash

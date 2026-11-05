@@ -39,6 +39,7 @@ sun-ray/
 ├── main.go       # GUI：mygo 原生 UI（窗口、表单、按钮、日志）
 ├── core.go       # xray-core 进程内封装：配置生成、启停、日志、流量
 ├── main_test.go  # headless UI 测试 + 内核启停冒烟测试
+├── integration/  # 按协议端到端测试（本地上游 + curl）
 ├── go.mod        # replace ./mygo、./xray-core
 ├── mygo/         # 子模块
 └── xray-core/    # 子模块
@@ -59,6 +60,9 @@ go build -o sun-ray.exe .
 
 # 运行测试（headless 渲染，无需窗口）
 go test ./...
+
+# 按协议端到端测试：本地启动上游，curl 通过混合入站访问本地 origin
+go test -tags integration -count=1 -v -timeout 10m ./integration
 ```
 
 ### macOS 打包
@@ -114,6 +118,7 @@ sun-ray-nogui-linux-amd64 -config /etc/sunray.json
 - 配置格式与 GUI 完全相同（同一个 `sunray.json`），服务器上也**不需要额外的 .dat 文件**：geo 资产已经内嵌在二进制里
 - 日志直接打到标准输出（systemd 下就是 journal），`SIGINT`/`SIGTERM` 会优雅停止内核
 - `-test` 跑一次延迟与速度测量就退出，`-version` 打印版本
+- `-test-mode` 启动后打印 `SUNRAY_READY host:port` 并等待信号，供集成测试使用
 - 无界面版**不碰系统代理与环境变量**（那些是给图形机上的浏览器/终端用的设置）
 
 systemd 单元示例：
