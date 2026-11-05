@@ -84,8 +84,7 @@ jobs:
         with:
           name: sun-ray-${{ matrix.name }}
           path: |
-            sun-ray-*.zip
-            sun-ray-*.dmg
+            sun-ray-*
           if-no-files-found: error
 
   # The headless build for servers and containers: same core, same config
