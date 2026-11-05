@@ -38,8 +38,9 @@ jobs:
 
       - name: Test
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         run: |
-          go test -v ./... 2>&1 | tee test-output.log
+          go test -v -timeout 300s ./... 2>&1 | tee test-output.log
           code=${PIPESTATUS[0]}
           if [ $code -ne 0 ]; then
             tail -60 test-output.log | sed 's/^/::error::/'

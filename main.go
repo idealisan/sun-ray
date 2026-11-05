@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -81,7 +82,9 @@ func (a *app) syncEnvProxy(g *globalConfig) {
 		return
 	}
 	if commands != "" {
-		mygo.Clipboard.WriteText(commands)
+		if a.win != nil {
+			mygo.Clipboard.WriteText(commands)
+		}
 		a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
 		return
 	}
@@ -849,6 +852,10 @@ func (a *app) setUpTray() {
 }
 
 func main() {
+	// Keep the resident size in check: the core and the UI together do not
+	// need much, and a tighter heap costs a little CPU.
+	debug.SetGCPercent(50)
+	debug.SetMemoryLimit(256 << 20)
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
 	a.lastConfig = a.configFingerprint()

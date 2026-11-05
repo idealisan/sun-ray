@@ -1,0 +1,55 @@
+package main
+
+// The xray-core modules the app uses. The upstream distro/all also pulls
+// in the gRPC command services, the metrics exporter and the reverse
+// proxy, none of which the app needs, and they make the binary bigger.
+// Every protocol and transport the app offers is registered here.
+
+import (
+	// The features the core needs.
+	_ "github.com/xtls/xray-core/app/dispatcher"
+	_ "github.com/xtls/xray-core/app/dns"
+	_ "github.com/xtls/xray-core/app/geodata"
+	_ "github.com/xtls/xray-core/app/log"
+	_ "github.com/xtls/xray-core/app/policy"
+	_ "github.com/xtls/xray-core/app/proxyman/inbound"
+	_ "github.com/xtls/xray-core/app/proxyman/outbound"
+	_ "github.com/xtls/xray-core/app/router"
+	_ "github.com/xtls/xray-core/app/stats"
+
+	// The protocols.
+	_ "github.com/xtls/xray-core/proxy/blackhole"
+	_ "github.com/xtls/xray-core/proxy/dns"
+	_ "github.com/xtls/xray-core/proxy/dokodemo"
+	_ "github.com/xtls/xray-core/proxy/freedom"
+	_ "github.com/xtls/xray-core/proxy/http"
+	_ "github.com/xtls/xray-core/proxy/hysteria"
+	_ "github.com/xtls/xray-core/proxy/loopback"
+	_ "github.com/xtls/xray-core/proxy/masque"
+	_ "github.com/xtls/xray-core/proxy/shadowsocks"
+	_ "github.com/xtls/xray-core/proxy/socks"
+	_ "github.com/xtls/xray-core/proxy/trojan"
+	_ "github.com/xtls/xray-core/proxy/tun"
+	_ "github.com/xtls/xray-core/proxy/vless/inbound"
+	_ "github.com/xtls/xray-core/proxy/vless/outbound"
+	_ "github.com/xtls/xray-core/proxy/vmess/inbound"
+	_ "github.com/xtls/xray-core/proxy/vmess/outbound"
+	_ "github.com/xtls/xray-core/proxy/wireguard"
+
+	// The transports.
+	_ "github.com/xtls/xray-core/transport/internet/grpc"
+	_ "github.com/xtls/xray-core/transport/internet/headers/http"
+	_ "github.com/xtls/xray-core/transport/internet/headers/noop"
+	_ "github.com/xtls/xray-core/transport/internet/httpupgrade"
+	_ "github.com/xtls/xray-core/transport/internet/hysteria"
+	_ "github.com/xtls/xray-core/transport/internet/kcp"
+	_ "github.com/xtls/xray-core/transport/internet/masque"
+	_ "github.com/xtls/xray-core/transport/internet/reality"
+	_ "github.com/xtls/xray-core/transport/internet/splithttp"
+	_ "github.com/xtls/xray-core/transport/internet/tagged/taggedimpl"
+	_ "github.com/xtls/xray-core/transport/internet/tcp"
+	_ "github.com/xtls/xray-core/transport/internet/tls"
+	_ "github.com/xtls/xray-core/transport/internet/udp"
+	_ "github.com/xtls/xray-core/transport/internet/websocket"
+	_ "github.com/xtls/xray-core/transport/internet/xdrive"
+)
