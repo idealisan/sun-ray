@@ -29,13 +29,18 @@ type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
 
-	LogLevel   string `json:"logLevel"`
-	ProxyMode  string `json:"proxyMode"`  // off, manual, pac
-	AutoStart  bool   `json:"autoStart"`  // start the core when the app starts
-	EnvProxy   bool   `json:"envProxy"`   // set the proxy environment variables for the user
-	SoftRender bool   `json:"softRender"` // draw with the software rasterizer, which uses less memory
-	RouteCN    bool   `json:"routeCN"`    // direct traffic to mainland China sites/IPs
-	RouteAds   bool   `json:"routeAds"`   // block ad domains
+	LogLevel   string  `json:"logLevel"`
+	ProxyMode  string  `json:"proxyMode"`  // off, manual, pac
+	AutoStart  bool    `json:"autoStart"`  // start the core when the app starts
+	EnvProxy   bool    `json:"envProxy"`   // set the proxy environment variables for the user
+	SoftRender bool    `json:"softRender"` // draw with the software rasterizer, which uses less memory
+	RouteCN    bool    `json:"routeCN"`    // direct traffic to mainland China sites/IPs
+	RouteAds   bool    `json:"routeAds"`   // block ad domains
+	TunEnabled bool    `json:"tunEnabled"` // the TUN interface takes all the traffic
+	TunName    string  `json:"tunName"`    // the interface name, empty lets xray pick one
+	TunMTU     float64 `json:"tunMtu"`     // the interface MTU
+	TunGateway string  `json:"tunGateway"` // the interface address
+	TunIPv6    bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
 }
 
 // serverConfig is one entry of the server list; protocolSpec binds into it.
@@ -210,6 +215,17 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 		"routeOnly":    true,
 	}
 
+	inbounds := []any{
+		// Mixed inbound: one port auto-detects SOCKS and HTTP clients.
+		map[string]any{
+			"tag": "mixed-in", "listen": listen, "port": listenPort,
+			"protocol": "mixed", "sniffing": sniffing,
+			"settings": map[string]any{"auth": "noauth", "udp": true},
+		},
+	}
+	if g.TunEnabled {
+		inbounds = append(inbounds, tunInbound(g))
+	}
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": g.LogLevel},
 		"routing":   map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
@@ -224,14 +240,7 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 				"statsOutboundUplink": true, "statsOutboundDownlink": true,
 			},
 		},
-		"inbounds": []any{
-			// Mixed inbound: one port auto-detects SOCKS and HTTP clients.
-			map[string]any{
-				"tag": "mixed-in", "listen": listen, "port": listenPort,
-				"protocol": "mixed", "sniffing": sniffing,
-				"settings": map[string]any{"auth": "noauth", "udp": true},
-			},
-		},
+		"inbounds": inbounds,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 } // guiHandler turns xray log messages into lines for the UI.

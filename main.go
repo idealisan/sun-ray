@@ -38,24 +38,25 @@ const (
 )
 
 type app struct {
-	cfg           appConfig
-	core          xrayCore
-	win           *mygo.Window
-	tray          *mygo.Tray
-	trayToggle    *mygo.MenuItem        // start/stop entry in the tray menu
-	quitting      bool                  // a real quit is under way, so closing may proceed
-	tab           int                   // selected tab in the main window
-	saver         configSaver           // debounced persistence to ~/sunray.json
-	tests         map[string]*testState // per server measurement results
-	lastProxyMode string                // the mode the system proxy was set to
-	lastProxyAddr string                // the address it was set to
-	pac           *pacServer            // the local server that serves the PAC file
-	lastConfig    string                // fingerprint of the config the core runs with
-	restartAt     time.Time             // when to restart the core after a change
-	lastEnvProxy  bool                  // the env proxy setting the system has
-	lastEnvAddr   string                // the address it was set to
-	lastTrayTip   string                // the hover text the tray shows
-	testing       bool                  // a measurement run is in progress
+	cfg            appConfig
+	core           xrayCore
+	win            *mygo.Window
+	tray           *mygo.Tray
+	trayToggle     *mygo.MenuItem        // start/stop entry in the tray menu
+	quitting       bool                  // a real quit is under way, so closing may proceed
+	tab            int                   // selected tab in the main window
+	saver          configSaver           // debounced persistence to ~/sunray.json
+	tests          map[string]*testState // per server measurement results
+	lastProxyMode  string                // the mode the system proxy was set to
+	lastProxyAddr  string                // the address it was set to
+	pac            *pacServer            // the local server that serves the PAC file
+	lastConfig     string                // fingerprint of the config the core runs with
+	restartAt      time.Time             // when to restart the core after a change
+	lastEnvProxy   bool                  // the env proxy setting the system has
+	lastEnvAddr    string                // the address it was set to
+	lastTrayTip    string                // the hover text the tray shows
+	tunWarningText string                // why the TUN interface cannot be created
+	testing        bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
 
@@ -99,15 +100,19 @@ func (a *app) syncEnvProxy(g *globalConfig) {
 	}
 } // routingModeLabel names the routing in a few words, for the tray tip.
 func routingModeLabel(g globalConfig) string {
+	prefix := ""
+	if g.TunEnabled {
+		prefix = "TUN·"
+	}
 	switch {
 	case g.RouteCN && g.RouteAds:
-		return "分流·大陆直连+拦截广告"
+		return prefix + "分流·大陆直连+拦截广告"
 	case g.RouteCN:
-		return "分流·大陆直连"
+		return prefix + "分流·大陆直连"
 	case g.RouteAds:
-		return "分流·拦截广告"
+		return prefix + "分流·拦截广告"
 	default:
-		return "全部代理"
+		return prefix + "全部代理"
 	}
 }
 
@@ -126,6 +131,21 @@ func (a *app) trayTipText() string {
 		down = "—"
 	}
 	return fmt.Sprintf("Sun Ray · %s · ↑%s ↓%s · %s", name, up, down, routingModeLabel(a.cfg.Global))
+}
+
+// updateTrayIcon shows a filled icon while the core runs, and an outlined
+// one while it is stopped.
+func (a *app) updateTrayIcon() {
+	if a.tray == nil {
+		return
+	}
+	var icon []byte
+	if a.core.Running() {
+		icon = trayTemplatePNG
+	} else {
+		icon = trayTemplateOutlinePNG
+	}
+	_ = a.tray.SetIcon(icon, true)
 }
 
 // updateTrayTip refreshes the tray hover text, when it changed.
@@ -216,6 +236,7 @@ func (a *app) start() {
 		return
 	}
 	a.addLog("[sun-ray] 内核已在本进程内启动")
+	a.updateTrayIcon()
 }
 
 func (a *app) stop() {
@@ -226,6 +247,7 @@ func (a *app) stop() {
 		return
 	}
 	a.addLog("[sun-ray] 内核已停止")
+	a.updateTrayIcon()
 }
 
 // pollTraffic samples the stats counters once a second from a goroutine,
@@ -302,6 +324,7 @@ func (a *app) view(c *ui.Context) {
 // globalTab: inbound ports, sniffing, log level and routing presets.
 func (a *app) globalTab(c *ui.Context) {
 	g := &a.cfg.Global
+	t := c.Theme()
 	ui.Row(c).Fill().Gap(24).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "入站（本机代理）").Bold()
@@ -313,32 +336,69 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）")
 			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，Windows/Linux 有效）")
 			a.syncEnvProxy(g)
+
+			ui.Text(c, "TUN 模式").Bold()
+			ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，需要管理员权限）")
+			if g.TunEnabled {
+				ui.Field(c, "接口名", func() {
+					ui.TextInput(c, &g.TunName).Placeholder(defaultTunName)
+				})
+				ui.Field(c, "MTU", func() {
+					ui.NumberInput(c, &g.TunMTU, 576, 9000, 100)
+				})
+				ui.Field(c, "网关地址", func() {
+					ui.TextInput(c, &g.TunGateway).Placeholder(defaultTunGateway)
+				})
+				ui.Checkbox(c, &g.TunIPv6, "同时接管 IPv6")
+				if msg := a.tunWarning(); msg != "" {
+					ui.Text(c, msg).TextColor(t.TextMuted)
+				}
+			}
 		})
+
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
-			ui.Text(c, "系统代理").Bold()
-			ui.Field(c, "代理模式", func() {
-				ui.RadioGroup(c, func() {
-					ui.Row(c).Gap(14).Children(func() {
-						for _, mode := range proxyModeOptions {
-							ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
-						}
+			if g.TunEnabled {
+				ui.Text(c, "系统代理").Bold()
+				ui.Text(c, "TUN 模式接管全部流量，不再修改系统代理").TextColor(t.TextMuted)
+				if g.ProxyMode != proxyModeOff {
+					g.ProxyMode = proxyModeOff
+					a.clearSystemProxySetting()
+				}
+			} else {
+				ui.Text(c, "系统代理").Bold()
+				ui.Field(c, "代理模式", func() {
+					ui.RadioGroup(c, func() {
+						ui.Row(c).Gap(14).Children(func() {
+							for _, mode := range proxyModeOptions {
+								ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
+							}
+						})
 					})
 				})
-			})
-			if ui.Button(c.Key("clearsysproxy"), "清空系统代理").Clicked() {
-				g.ProxyMode = proxyModeOff
-				a.clearSystemProxySetting()
+				if ui.Button(c.Key("clearsysproxy"), "清空系统代理").Clicked() {
+					g.ProxyMode = proxyModeOff
+					a.clearSystemProxySetting()
+				}
+				a.syncSystemProxy(g)
 			}
-			a.syncSystemProxy(g)
+
 			ui.Text(c, "日志").Bold()
 			renderChoice(c, "日志级别", &g.LogLevel, logLevels)
-
 			ui.Text(c, "路由预设").Bold()
 			ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
 			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
 			a.updateTrayTip()
 		})
 	})
+}
+
+// tunWarning says why the TUN interface cannot be created, if that is the
+// case. The rights do not change while the app runs, so it asks once.
+func (a *app) tunWarning() string {
+	if a.tunWarningText == "" {
+		a.tunWarningText = tunPrivilegeError()
+	}
+	return a.tunWarningText
 }
 
 // serverListTab: the list of servers. A double click edits a server in its
@@ -864,7 +924,7 @@ func (a *app) setUpTray() {
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
 		// macOS tints a template icon to match the menu bar; Windows turns
 		// it white on a dark taskbar.
-		icon, template = trayTemplatePNG, true
+		icon, template = trayTemplateOutlinePNG, true
 	}
 	tray, err := mygo.NewTray(mygo.TrayOptions{
 		ID:             "sun-ray",
@@ -877,6 +937,7 @@ func (a *app) setUpTray() {
 		return
 	}
 	a.tray = tray
+	a.updateTrayIcon()
 	a.trayToggle = &mygo.MenuItem{
 		Label: a.coreActionLabel(),
 		Click: func(*mygo.MenuItem, *mygo.Window) { a.toggleCore() },

@@ -55,6 +55,11 @@ func main() {
 		return
 	}
 
+	if cfg.Global.TunEnabled {
+		if msg := tunPrivilegeError(); msg != "" {
+			log.Println("提示：" + msg)
+		}
+	}
 	data, err := s.buildJSON(&cfg.Global)
 	if err != nil {
 		log.Fatal(err)

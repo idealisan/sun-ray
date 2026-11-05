@@ -87,6 +87,18 @@ git -C xray-core apply ../patches/xray-core-embedded-assets.patch
 
 若更新子模块，需确认补丁仍可应用（必要时重新生成）。
 
+## TUN 模式
+
+TUN 模式接管**全部**流量，不依赖应用是否支持代理——服务器上跑、或不想逐个设置代理的程序（游戏、某些国产软件、容器）都能走代理。
+
+- 全局设置里勾选「启用 TUN」，可调接口名、MTU、网关地址、是否连 IPv6 一起接管
+- 需要**管理员/root 权限**：Linux 需要 `/dev/net/tun` 与 `CAP_NET_ADMIN`，Windows 需要管理员，macOS 需要 root。权限不足时界面会直接提示
+- 开启 TUN 后**不再修改系统代理**（TUN 已接管全部流量），本地 SOCKS/HTTP 端口仍然保留，方便排查
+- xray 会用自己的出站接口避开 TUN（`autoOutboundsInterface`），不会把自己绕进死循环
+- **不做系统 DNS 接管**（`autoSystemDnsToGateway`）：它在 Linux 上依赖 systemd-resolved 且条件苛刻，容易出现解析死锁。DNS 查询仍走系统解析器（可能被运营商看到域名）
+- TUN 是 L3 代理而不是真 VPN：连到不存在的主机也会先握手成功再断开，ICMP Echo 由本地生成
+- 崩溃时可能残留路由：Linux 上可 `ip route del default dev sunray0` 清理
+
 ## 无界面版（Linux）
 
 `sun-ray-nogui-linux-amd64` / `-arm64` 是同一份代码的**无界面构建**：跑的是同一个 xray-core、读同一份 `sunray.json`，只是没有界面。它为「在电脑上用 GUI 配好，拷到服务器上跑」的场景而生：
