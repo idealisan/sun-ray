@@ -259,6 +259,17 @@ func (a *app) runTestsFor(ids []string) {
 				if err != nil {
 					st.failed = true
 					st.err = err.Error()
+				} else {
+					// Keep the measurement, so the list still shows it after a
+					// restart and the servers can be compared.
+					if a.cfg.Results == nil {
+						a.cfg.Results = map[string]serverResult{}
+					}
+					a.cfg.Results[s.ID] = serverResult{
+						LatencyMs: int(latency.Milliseconds()),
+						SpeedBps:  speed,
+						TestedAt:  time.Now().Unix(),
+					}
 				}
 				a.tests[s.ID] = st
 			})

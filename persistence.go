@@ -40,6 +40,9 @@ func loadConfig() appConfig {
 			saved.Servers[i].ID = newServerID()
 		}
 	}
+	if saved.Results == nil {
+		saved.Results = map[string]serverResult{}
+	}
 	return saved
 }
 

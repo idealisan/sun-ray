@@ -259,21 +259,30 @@ func (a *app) serverListTab(c *ui.Context) {
 				case 5:
 					st := a.testStateOf(s.ID)
 					switch {
-					case st == nil:
-						ui.Text(c, "-")
-					case st.running:
+					case st != nil && st.running:
 						ui.Text(c, "测试中…")
-					case st.failed:
+					case st != nil && st.failed:
 						ui.Text(c, "失败")
 					default:
-						ui.Text(c, formatLatency(st.latency))
+						if r, ok := a.cfg.Results[s.ID]; ok {
+							ui.Text(c, formatLatency(time.Duration(r.LatencyMs)*time.Millisecond))
+						} else {
+							ui.Text(c, "-")
+						}
 					}
 				case 6:
 					st := a.testStateOf(s.ID)
-					if st == nil || st.failed || st.speed <= 0 {
+					switch {
+					case st != nil && st.running:
+						ui.Text(c, "测试中…")
+					case st != nil && st.failed:
 						ui.Text(c, "-")
-					} else {
-						ui.Text(c, "↓ "+formatSpeed(st.speed))
+					default:
+						if r, ok := a.cfg.Results[s.ID]; ok && r.SpeedBps > 0 {
+							ui.Text(c, "↓ "+formatSpeed(r.SpeedBps))
+						} else {
+							ui.Text(c, "-")
+						}
 					}
 				}
 			})
@@ -523,6 +532,7 @@ func (a *app) deleteServers(ids []string) {
 	drop := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		drop[id] = true
+		delete(a.cfg.Results, id)
 	}
 	kept := a.cfg.Servers[:0]
 	for _, s := range a.cfg.Servers {
@@ -547,8 +557,13 @@ func (a *app) deleteServers(ids []string) {
 func (a *app) updateServer(id string, s serverConfig) {
 	for i := range a.cfg.Servers {
 		if a.cfg.Servers[i].ID == id {
+			old := a.cfg.Servers[i]
 			s.ID = id
 			a.cfg.Servers[i] = s
+			// A changed endpoint makes the stored measurement stale.
+			if old.Address != s.Address || old.Port != s.Port || old.Protocol != s.Protocol {
+				delete(a.cfg.Results, id)
+			}
 			return
 		}
 	}

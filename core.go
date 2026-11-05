@@ -79,9 +79,18 @@ type serverConfig struct {
 // appConfig is the whole persisted state: global settings plus the server
 // list and the id of the server in use.
 type appConfig struct {
-	Global   globalConfig   `json:"global"`
-	Servers  []serverConfig `json:"servers"`
-	ActiveID string         `json:"activeId"`
+	Global   globalConfig            `json:"global"`
+	Servers  []serverConfig          `json:"servers"`
+	ActiveID string                  `json:"activeId"`
+	Results  map[string]serverResult `json:"results,omitempty"`
+}
+
+// serverResult is a stored measurement of one server, kept so the list
+// still shows which server is faster after a restart.
+type serverResult struct {
+	LatencyMs int     `json:"latencyMs"`
+	SpeedBps  float64 `json:"speedBps"`
+	TestedAt  int64   `json:"testedAt"` // unix seconds
 }
 
 func defaultGlobalConfig() globalConfig {
@@ -98,7 +107,12 @@ func defaultServerConfig() serverConfig {
 
 func defaultAppConfig() appConfig {
 	s := defaultServerConfig()
-	return appConfig{Global: defaultGlobalConfig(), Servers: []serverConfig{s}, ActiveID: s.ID}
+	return appConfig{
+		Global:   defaultGlobalConfig(),
+		Servers:  []serverConfig{s},
+		ActiveID: s.ID,
+		Results:  map[string]serverResult{},
+	}
 }
 
 // newServerID returns a random id, stable across renames and reorders.
