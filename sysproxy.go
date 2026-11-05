@@ -92,21 +92,26 @@ func (a *app) syncSystemProxy(g *globalConfig) {
 	if g.ProxyMode == proxyModeOff {
 		return // 不修改：不碰系统设置
 	}
-	if err := applySystemProxy(g.ProxyMode, addr); err != nil {
-		a.addLog("[sun-ray] 设置系统代理失败: " + err.Error())
-		return
-	}
-	a.addLog("[sun-ray] 已启用" + proxyModeLabel(g.ProxyMode) + "：" + addr)
+	mode, target := g.ProxyMode, addr
+	go func() {
+		if err := applySystemProxy(mode, target); err != nil {
+			a.addLog("[sun-ray] 设置系统代理失败: " + err.Error())
+			return
+		}
+		a.addLog("[sun-ray] 已启用" + proxyModeLabel(mode) + "：" + target)
+	}()
 }
 
 // clearSystemProxySetting removes the proxy settings from the system.
 func (a *app) clearSystemProxySetting() {
-	if err := applySystemProxy(proxyActionClear, ""); err != nil {
-		a.addLog("[sun-ray] 清空系统代理失败: " + err.Error())
-		return
-	}
 	a.lastProxyMode, a.lastProxyAddr = proxyModeOff, ""
-	a.addLog("[sun-ray] 已清空系统代理")
+	go func() {
+		if err := applySystemProxy(proxyActionClear, ""); err != nil {
+			a.addLog("[sun-ray] 清空系统代理失败: " + err.Error())
+			return
+		}
+		a.addLog("[sun-ray] 已清空系统代理")
+	}()
 }
 
 // restoreSystemProxy removes the proxy the app set, so the system is

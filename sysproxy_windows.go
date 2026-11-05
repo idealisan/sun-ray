@@ -58,7 +58,12 @@ func clearSystemProxy() error {
 // notifyWinINET tells WinINET that the settings changed, so they take
 // effect without signing out or restarting the browser.
 func notifyWinINET() {
-	proc := windows.NewLazySystemDLL("wininet.dll").NewProc("InternetSetOption")
+	// wininet.dll exports the wide entry point; looking up the name
+	// without the suffix fails, and calling a missing procedure panics.
+	proc := windows.NewLazySystemDLL("wininet.dll").NewProc("InternetSetOptionW")
+	if err := proc.Find(); err != nil {
+		return
+	}
 	const (
 		settingsChanged = 39
 		refresh         = 37
