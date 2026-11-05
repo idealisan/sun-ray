@@ -67,7 +67,11 @@ jobs:
             # mygo build makes a signed .app (and a .dmg) with the icon and
             # Info.plist, so users can double-click it.
             go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -o dist
-            ditto -c -k --keepParent "dist/darwin-arm64/Sun Ray.app" "dist/sun-ray-darwin-arm64.zip"
+            ditto -c -k --keepParent "dist/darwin-arm64/Sun Ray.app" "sun-ray-darwin-arm64.zip"
+            # the disk image goes next to it, in the working directory
+            for dmg in dist/darwin-arm64/*.dmg; do
+              [ -e "$dmg" ] && cp "$dmg" .
+            done
           else
             NAME=sun-ray-${{ matrix.name }}
             if [ "$RUNNER_OS" = "Windows" ]; then NAME="$NAME.exe"; fi
@@ -80,9 +84,8 @@ jobs:
         with:
           name: sun-ray-${{ matrix.name }}
           path: |
-            sun-ray-*
-            dist/sun-ray-darwin-arm64.zip
-            dist/darwin-arm64/*.dmg
+            sun-ray-*.zip
+            sun-ray-*.dmg
           if-no-files-found: error
 
   # The headless build for servers and containers: same core, same config
@@ -122,7 +125,7 @@ jobs:
       - name: Upload the headless binaries
         uses: actions/upload-artifact@v4
         with:
-          name: nogui
+          name: sun-ray-nogui
           path: dist/sun-ray-nogui-*
           if-no-files-found: error
 
@@ -165,11 +168,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: sun-ray-*
           merge-multiple: true
           path: dist
 
       - name: Attach binaries to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: dist/**
           generate_release_notes: true
