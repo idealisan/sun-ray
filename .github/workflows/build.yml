@@ -101,6 +101,13 @@ jobs:
       - name: Build the app and the probes
         run: bash scripts/size-report.sh
 
+      - name: Upload the probes
+        uses: actions/upload-artifact@v4
+        with:
+          name: probes
+          path: dist/probe-*
+          if-no-files-found: error
+
   # On a v* tag push, create a GitHub Release and attach all binaries.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
