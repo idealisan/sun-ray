@@ -68,7 +68,7 @@ jobs:
           else
             NAME=sun-ray-${{ matrix.name }}
             if [ "$RUNNER_OS" = "Windows" ]; then NAME="$NAME.exe"; fi
-            go build -trimpath -ldflags "-s -w" -o "$NAME" .
+            go build -trimpath -ldflags "-s -w" -gcflags "all=-l" -o "$NAME" .
           fi
 
       - name: Upload artifact
