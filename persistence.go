@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -30,14 +31,25 @@ func loadConfig() appConfig { return loadConfigFrom(configPath()) }
 // loadConfigFrom reads a config file; a missing or broken file falls back to the
 // defaults.
 func loadConfigFrom(path string) appConfig {
-	cfg := defaultAppConfig()
+	cfg, err := loadConfigFile(path)
+	if err != nil {
+		return defaultAppConfig()
+	}
+	return cfg
+}
+
+// loadConfigFile is loadConfigFrom with the error kept, for test mode.
+func loadConfigFile(path string) (appConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg
+		return appConfig{}, err
 	}
 	var saved appConfig
-	if err := json.Unmarshal(data, &saved); err != nil || len(saved.Servers) == 0 {
-		return cfg
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return appConfig{}, err
+	}
+	if len(saved.Servers) == 0 {
+		return appConfig{}, fmt.Errorf("%s: config has no servers", path)
 	}
 	for i := range saved.Servers {
 		if saved.Servers[i].ID == "" {
@@ -47,7 +59,7 @@ func loadConfigFrom(path string) appConfig {
 	if saved.Results == nil {
 		saved.Results = map[string]serverResult{}
 	}
-	return saved
+	return saved, nil
 }
 
 // saveConfig writes the config atomically (temp file + rename).
