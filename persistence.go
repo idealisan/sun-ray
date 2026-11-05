@@ -56,6 +56,14 @@ func loadConfigFile(path string) (appConfig, error) {
 			saved.Servers[i].ID = newServerID()
 		}
 	}
+	for i := range saved.Subscriptions {
+		if saved.Subscriptions[i].ID == "" {
+			saved.Subscriptions[i].ID = newServerID()
+		}
+	}
+	if saved.Subscriptions == nil {
+		saved.Subscriptions = []subscriptionConfig{}
+	}
 	if saved.Results == nil {
 		saved.Results = map[string]serverResult{}
 	}

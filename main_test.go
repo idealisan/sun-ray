@@ -15,7 +15,7 @@ func TestView(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), cursor: -1}
 	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"Sun Ray", "全局", "服务器列表", "日志", "入站（本机代理）", "监听端口", "已停止", "启动", "路由预设", "日志级别"} {
+	for _, want := range []string{"Sun Ray", "全局", "服务器列表", "订阅", "日志", "入站（本机代理）", "监听端口", "已停止", "启动", "路由预设", "日志级别"} {
 		if !tt.HasText(want) {
 			t.Errorf("view missing text %q; texts: %v", want, tt.Texts())
 		}
@@ -31,6 +31,84 @@ func TestViewServerList(t *testing.T) {
 		if !tt.HasText(want) {
 			t.Errorf("server list missing text %q; texts: %v", want, tt.Texts())
 		}
+	}
+}
+
+// The subscription tab is a list with its toolbar and columns.
+func TestViewSubscriptionList(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabSubscription, subCursor: -1}
+	a.cfg.Subscriptions = []subscriptionConfig{{
+		ID: "sub-1", Name: "test-sub", URL: "https://example.com/sub",
+	}}
+	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
+	tt := ui.NewTester(a.view, 880, 620)
+	for _, want := range []string{"订阅", "新增", "编辑", "复制", "删除", "名称", "订阅地址", "节点", "更新时间", "共 1 个", "test-sub", "https://example.com/sub"} {
+		if !tt.HasText(want) {
+			t.Errorf("subscription list missing text %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+// A row click chooses a subscription; a toolbar click clears the choice.
+func TestSubscriptionListSelectionClears(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabSubscription, subCursor: -1}
+	a.cfg.Subscriptions = []subscriptionConfig{{
+		ID: "sub-1", Name: "test-sub", URL: "https://example.com/sub",
+	}}
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if err := tt.Click("test-sub"); err != nil {
+		t.Fatal(err)
+	}
+	if a.subCursor != 0 || a.subChosen.Len() != 1 {
+		t.Fatalf("after a row click: cursor %d, chosen %d", a.subCursor, a.subChosen.Len())
+	}
+	if err := tt.Click("共 1 个"); err != nil {
+		t.Fatal(err)
+	}
+	if a.subCursor != -1 || a.subChosen.Len() != 0 {
+		t.Fatalf("after a toolbar click: cursor %d, chosen %d", a.subCursor, a.subChosen.Len())
+	}
+}
+
+// The subscription list supports add, edit, batch duplicate and batch
+// delete; deleting a subscription also drops the servers it imported.
+func TestSubscriptionListOps(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), subCursor: -1}
+	a.addSubscription()
+	if len(a.cfg.Subscriptions) != 1 {
+		t.Fatalf("after add: got %d subscriptions, want 1", len(a.cfg.Subscriptions))
+	}
+	added := a.cfg.Subscriptions[0].ID
+	a.updateSubscription(added, subscriptionConfig{
+		Name: "  机场订阅  ", URL: "  https://example.com/sub  ",
+		UpdatedAt: 123, ServerCount: 4,
+	})
+	if got := a.cfg.Subscriptions[0]; got.Name != "机场订阅" || got.URL != "https://example.com/sub" {
+		t.Fatalf("after update: %+v", got)
+	}
+	a.updateSubscription(added, subscriptionConfig{Name: "机场订阅", URL: "https://example.com/new"})
+	if got := a.cfg.Subscriptions[0]; got.UpdatedAt != 0 || got.ServerCount != 0 {
+		t.Fatalf("a changed URL should make the import stale: %+v", got)
+	}
+
+	a.subChosen.Add(added)
+	a.duplicateSelectedSubscriptions()
+	if len(a.cfg.Subscriptions) != 2 {
+		t.Fatalf("after duplicate: got %d subscriptions, want 2", len(a.cfg.Subscriptions))
+	}
+
+	a.cfg.Servers = append(a.cfg.Servers, serverConfig{
+		ID: "imported", SubscriptionID: added, Protocol: "freedom",
+	})
+	a.subChosen.Clear()
+	a.subChosen.Add(added)
+	a.deleteSelectedSubscriptions()
+	if len(a.cfg.Subscriptions) != 1 {
+		t.Fatalf("after deleting one: got %d subscriptions, want 1", len(a.cfg.Subscriptions))
+	}
+	if _, ok := a.serverByID("imported"); ok {
+		t.Fatal("the imported server should be removed with its subscription")
 	}
 }
 

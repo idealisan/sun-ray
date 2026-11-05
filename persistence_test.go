@@ -9,7 +9,7 @@ import (
 func TestLoadConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sunray.json")
-	data := `{"global":{"listenPort":"10808"},"servers":[{"id":"a","name":"n","protocol":"freedom"}],"activeId":"a"}`
+	data := `{"global":{"listenPort":"10808"},"servers":[{"id":"a","name":"n","protocol":"freedom"}],"subscriptions":[{"name":"sub","url":"https://example.com/sub"}],"activeId":"a"}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -23,6 +23,9 @@ func TestLoadConfigFile(t *testing.T) {
 	}
 	if cfg.Results == nil {
 		t.Fatal("Results should be initialized")
+	}
+	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0].ID == "" {
+		t.Fatalf("subscription should load with an id: %+v", cfg.Subscriptions)
 	}
 }
 

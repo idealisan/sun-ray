@@ -52,8 +52,9 @@ type globalConfig struct {
 
 // serverConfig is one entry of the server list; protocolSpec binds into it.
 type serverConfig struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID             string `json:"id"`
+	SubscriptionID string `json:"subscriptionId,omitempty"`
+	Name           string `json:"name"`
 
 	Protocol string `json:"protocol"` // key into protocolRegistry
 	Address  string `json:"address"`  // server address
@@ -90,13 +91,24 @@ type serverConfig struct {
 	SpiderX       string `json:"spiderX"`   // reality
 }
 
+// subscriptionConfig is one subscription URL in the subscription list.
+type subscriptionConfig struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	UpdatedAt   int64  `json:"updatedAt,omitempty"`
+	ServerCount int    `json:"serverCount,omitempty"`
+	LastError   string `json:"lastError,omitempty"`
+}
+
 // appConfig is the whole persisted state: global settings plus the server
 // list and the id of the server in use.
 type appConfig struct {
-	Global   globalConfig            `json:"global"`
-	Servers  []serverConfig          `json:"servers"`
-	ActiveID string                  `json:"activeId"`
-	Results  map[string]serverResult `json:"results,omitempty"`
+	Global        globalConfig            `json:"global"`
+	Servers       []serverConfig          `json:"servers"`
+	Subscriptions []subscriptionConfig    `json:"subscriptions,omitempty"`
+	ActiveID      string                  `json:"activeId"`
+	Results       map[string]serverResult `json:"results,omitempty"`
 }
 
 // serverResult is a stored measurement of one server, kept so the list
@@ -119,13 +131,18 @@ func defaultServerConfig() serverConfig {
 	}
 }
 
+func defaultSubscriptionConfig() subscriptionConfig {
+	return subscriptionConfig{ID: newServerID(), Name: "新订阅"}
+}
+
 func defaultAppConfig() appConfig {
 	s := defaultServerConfig()
 	return appConfig{
-		Global:   defaultGlobalConfig(),
-		Servers:  []serverConfig{s},
-		ActiveID: s.ID,
-		Results:  map[string]serverResult{},
+		Global:        defaultGlobalConfig(),
+		Servers:       []serverConfig{s},
+		Subscriptions: []subscriptionConfig{},
+		ActiveID:      s.ID,
+		Results:       map[string]serverResult{},
 	}
 }
 
@@ -169,6 +186,17 @@ func (s *serverConfig) displayName() string {
 		return s.Protocol + " · " + s.Address
 	}
 	return "未命名 " + s.Protocol
+}
+
+// displayName is the label the subscription list shows for this entry.
+func (s *subscriptionConfig) displayName() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	if s.URL != "" {
+		return s.URL
+	}
+	return "未命名订阅"
 }
 
 // buildJSON renders the server fields and the shared global settings into a

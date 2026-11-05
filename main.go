@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ const restartDelay = 1200 * time.Millisecond
 const (
 	tabGlobal = iota
 	tabServer
+	tabSubscription
 	tabLog
 )
 
@@ -82,6 +84,16 @@ type app struct {
 	listCells      []ui.Handle // rows in the last server list build
 	listCellN      int         // rows bound in listCells this frame
 	clearSelection bool        // a click outside the rows clears the choice
+
+	// Subscription list state.
+	subList      ui.ListState
+	subChosen    ui.Selection[string] // selected subscription ids
+	subCursor    int                  // row the keyboard acts on, -1 for none
+	subSort      ui.SortOrder
+	subLastSort  ui.SortOrder
+	subListCells []ui.Handle // rows in the last subscription list build
+	subListCellN int         // rows bound in subListCells this frame
+	subUpdating  map[string]bool
 }
 
 // syncEnvProxy sets the proxy environment variables for the user. Windows
@@ -460,26 +472,33 @@ func (a *app) view(c *ui.Context) {
 			}
 		})
 
-		ui.Tabs(c, &a.tab, "全局", "服务器列表", "日志")
+		ui.Tabs(c, &a.tab, "全局", "服务器列表", "订阅", "日志")
 		switch a.tab {
 		case tabGlobal:
 			a.globalTab(c)
 		case tabServer:
 			a.serverListTab(c)
+		case tabSubscription:
+			a.subscriptionListTab(c)
 		case tabLog:
 			a.logTab(c)
 		}
 		if a.tab != tabServer {
 			a.listCellN = 0
 		}
+		if a.tab != tabSubscription {
+			a.subListCellN = 0
+		}
 
-		// A click anywhere outside a server row clears the choice, after
+		// A click anywhere outside a list row clears the choice, after
 		// the widgets have handled it: a toolbar button still acts on the
 		// selection it was clicked with.
 		if a.clearSelection {
 			a.clearSelection = false
 			a.chosen.Clear()
 			a.cursor = -1
+			a.subChosen.Clear()
+			a.subCursor = -1
 		}
 	}).HandleInput(func(ev ui.InputEvent) bool {
 		if ev.Kind == ui.InputPointerDown && ev.Button == 0 && !a.pointerOverListRow(c, ev.X, ev.Y) {
@@ -489,11 +508,15 @@ func (a *app) view(c *ui.Context) {
 	})
 }
 
-// pointerOverListRow reports whether the point is over a row of the
-// server list, as the last frame built it.
+// pointerOverListRow reports whether the point is over a row of the list
+// on the current tab, as the last frame built it.
 func (a *app) pointerOverListRow(c *ui.Context, x, y float32) bool {
-	for i := 0; i < a.listCellN; i++ {
-		r := a.listCells[i].Bounds(c)
+	cells, n := a.listCells, a.listCellN
+	if a.tab == tabSubscription {
+		cells, n = a.subListCells, a.subListCellN
+	}
+	for i := 0; i < n && i < len(cells); i++ {
+		r := cells[i].Bounds(c)
 		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
 			return true
 		}
@@ -706,6 +729,302 @@ func (a *app) serverListTab(c *ui.Context) {
 				a.setActive(id)
 			}
 		}
+	})
+}
+
+// subscriptionListTab: the subscription list. A double click edits a
+// subscription in its own window; Enter does the same.
+func (a *app) subscriptionListTab(c *ui.Context) {
+	t := c.Theme()
+	a.applySubscriptionSort()
+	a.subListCellN = 0
+	a.subList.Key = func(row int) any { return a.cfg.Subscriptions[row].ID }
+	a.subList.Selection = &a.subChosen
+	a.subList.Selected = &a.subCursor
+	a.subList.Sort = &a.subSort
+
+	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			if ui.Button(c.Key("subadd"), "新增").Clicked() {
+				a.addSubscription()
+			}
+			if ui.Button(c.Key("subedit"), "编辑").Clicked() {
+				if id, ok := a.cursorSubscriptionID(); ok {
+					a.openSubscriptionEditor(id)
+				}
+			}
+			if ui.Button(c.Key("subdup"), "复制").Clicked() {
+				a.duplicateSelectedSubscriptions()
+			}
+			if ui.Button(c.Key("subdelsel"), "删除").Clicked() {
+				a.deleteSelectedSubscriptions()
+			}
+			ui.Text(c, fmt.Sprintf("共 %d 个", len(a.cfg.Subscriptions))).TextColor(t.TextMuted).Grow(1)
+		})
+
+		cols := []ui.TableColumn{
+			{Title: "名称", ID: "name", Sortable: true},
+			{Title: "订阅地址", ID: "url", Sortable: true},
+			{Title: "节点", ID: "servers", Width: 80, Align: ui.End, Sortable: true},
+			{Title: "更新时间", ID: "updated", Width: 150, Align: ui.End, Sortable: true},
+		}
+		dbl := -1
+		tbl := ui.Table(c, &a.subList, cols, len(a.cfg.Subscriptions), func(row, col int) {
+			s := &a.cfg.Subscriptions[row]
+			cell := ui.Box(c).FillWidth().Children(func() {
+				switch col {
+				case 0:
+					ui.Text(c, s.displayName()).SingleLine()
+				case 1:
+					ui.Text(c, s.URL).SingleLine()
+				case 2:
+					if s.ServerCount > 0 {
+						ui.Text(c, strconv.Itoa(s.ServerCount))
+					} else {
+						ui.Text(c, "-")
+					}
+				case 3:
+					ui.Text(c, formatSubscriptionTime(s.UpdatedAt))
+				}
+			})
+			cell = cell.ContextMenu(func(m *ui.Menu) {
+				if m.Item("编辑").Chosen() {
+					a.openSubscriptionEditor(s.ID)
+				}
+				if m.Item("复制").Chosen() {
+					a.duplicateSubscription(s.ID)
+				}
+				m.Separator()
+				if m.Item("删除").Chosen() {
+					a.deleteSubscriptions(a.subscriptionDeleteTargets(s.ID))
+				}
+			})
+			if cell.RowDoubleClicked() {
+				dbl = row
+			}
+			if a.subListCellN == len(a.subListCells) {
+				a.subListCells = append(a.subListCells, ui.Handle{})
+			}
+			cell.Bind(&a.subListCells[a.subListCellN])
+			a.subListCellN++
+		}).Grow(1)
+
+		switch {
+		case dbl >= 0:
+			a.subCursor = dbl
+			a.openSubscriptionEditor(a.cfg.Subscriptions[dbl].ID)
+		case tbl.Submitted():
+			if id, ok := a.cursorSubscriptionID(); ok {
+				a.openSubscriptionEditor(id)
+			}
+		}
+	})
+}
+
+func formatSubscriptionTime(ts int64) string {
+	if ts <= 0 {
+		return "-"
+	}
+	return time.Unix(ts, 0).Format("2006-01-02 15:04")
+}
+
+// subscriptionForm is the content of a subscription's editor window.
+func (a *app) subscriptionForm(c *ui.Context, s *subscriptionConfig) {
+	t := c.Theme()
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Field(c, "名称（可选）", func() {
+			ui.TextInput(c, &s.Name).Placeholder("例如 机场订阅")
+		})
+		ui.Field(c, "订阅地址", func() {
+			ui.TextInput(c, &s.URL).Placeholder("https://example.com/api/v1/client/subscribe?token=...")
+		})
+		ui.Text(c, "常见订阅会返回 Base64 编码的节点链接列表，也可能直接返回明文链接。").TextColor(t.TextMuted)
+	})
+}
+
+func (a *app) subscriptionEditorView(c *ui.Context, win *mygo.Window, s *subscriptionConfig, id string) {
+	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
+		ui.Text(c, "订阅设置").FontSize(16).Bold()
+		ui.Scroll(c).Grow(1).Children(func() {
+			a.subscriptionForm(c, s)
+		})
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.PrimaryButton(c.Key("subeditorsave"), "保存").Clicked() {
+				a.updateSubscription(id, *s)
+				a.saver.maybeSave(a.cfg, true)
+				win.Close()
+			}
+			if ui.Button(c.Key("subeditorcancel"), "取消").Clicked() {
+				win.Close()
+			}
+		})
+	})
+}
+
+func (a *app) openSubscriptionEditor(id string) {
+	s, ok := a.subscriptionByID(id)
+	if !ok {
+		return
+	}
+	edit := *s
+	title := "编辑订阅 · " + edit.displayName()
+	go func() {
+		var win *mygo.Window
+		win = mygo.NewWindow(mygo.WindowOptions{
+			Title:    title,
+			Width:    620,
+			Height:   360,
+			MinWidth: 520, MinHeight: 300,
+			Content: ui.View(func(c *ui.Context) {
+				a.subscriptionEditorView(c, win, &edit, id)
+			}),
+		})
+		_ = win.SetIcon(appIconPNG)
+	}()
+}
+
+func (a *app) subscriptionByID(id string) (*subscriptionConfig, bool) {
+	for i := range a.cfg.Subscriptions {
+		if a.cfg.Subscriptions[i].ID == id {
+			return &a.cfg.Subscriptions[i], true
+		}
+	}
+	return nil, false
+}
+
+func (a *app) cursorSubscriptionID() (string, bool) {
+	if a.subCursor >= 0 && a.subCursor < len(a.cfg.Subscriptions) {
+		return a.cfg.Subscriptions[a.subCursor].ID, true
+	}
+	for id := range a.subChosen.All() {
+		return id, true
+	}
+	return "", false
+}
+
+func (a *app) selectedSubscriptionIDs() []string {
+	ids := make([]string, 0, a.subChosen.Len())
+	for id := range a.subChosen.All() {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (a *app) addSubscription() {
+	a.cfg.Subscriptions = append(a.cfg.Subscriptions, defaultSubscriptionConfig())
+}
+
+func (a *app) duplicateSelectedSubscriptions() {
+	for _, id := range a.selectedSubscriptionIDs() {
+		a.duplicateSubscription(id)
+	}
+}
+
+func (a *app) duplicateSubscription(id string) {
+	s, ok := a.subscriptionByID(id)
+	if !ok {
+		return
+	}
+	cp := *s
+	cp.ID = newServerID()
+	cp.UpdatedAt = 0
+	cp.ServerCount = 0
+	cp.LastError = ""
+	if cp.Name != "" {
+		cp.Name += " 副本"
+	}
+	a.cfg.Subscriptions = append(a.cfg.Subscriptions, cp)
+}
+
+func (a *app) deleteSelectedSubscriptions() {
+	a.deleteSubscriptions(a.selectedSubscriptionIDs())
+}
+
+func (a *app) subscriptionDeleteTargets(id string) []string {
+	for sel := range a.subChosen.All() {
+		if sel == id {
+			return a.selectedSubscriptionIDs()
+		}
+	}
+	return []string{id}
+}
+
+func (a *app) deleteSubscriptions(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	drop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		drop[id] = true
+	}
+	kept := a.cfg.Subscriptions[:0]
+	for _, s := range a.cfg.Subscriptions {
+		if !drop[s.ID] {
+			kept = append(kept, s)
+		}
+	}
+	a.cfg.Subscriptions = kept
+	a.subChosen.Clear()
+	a.subCursor = -1
+
+	var servers []string
+	for _, s := range a.cfg.Servers {
+		if drop[s.SubscriptionID] {
+			servers = append(servers, s.ID)
+		}
+	}
+	a.deleteServers(servers)
+}
+
+func (a *app) updateSubscription(id string, s subscriptionConfig) {
+	for i := range a.cfg.Subscriptions {
+		if a.cfg.Subscriptions[i].ID == id {
+			old := a.cfg.Subscriptions[i]
+			s.ID = id
+			s.Name = strings.TrimSpace(s.Name)
+			s.URL = strings.TrimSpace(s.URL)
+			if old.URL != s.URL {
+				s.UpdatedAt = 0
+				s.ServerCount = 0
+				s.LastError = ""
+			}
+			a.cfg.Subscriptions[i] = s
+			return
+		}
+	}
+}
+
+func (a *app) applySubscriptionSort() {
+	if a.subSort == a.subLastSort {
+		return
+	}
+	a.subLastSort = a.subSort
+	if a.subSort.Column == "" {
+		return
+	}
+	sort.SliceStable(a.cfg.Subscriptions, func(i, j int) bool {
+		x, y := a.cfg.Subscriptions[i], a.cfg.Subscriptions[j]
+		var cmp int
+		switch a.subSort.Column {
+		case "name":
+			cmp = strings.Compare(x.displayName(), y.displayName())
+		case "url":
+			cmp = strings.Compare(x.URL, y.URL)
+		case "servers":
+			cmp = x.ServerCount - y.ServerCount
+		case "updated":
+			if x.UpdatedAt < y.UpdatedAt {
+				cmp = -1
+			} else if x.UpdatedAt > y.UpdatedAt {
+				cmp = 1
+			}
+		default:
+			return false
+		}
+		if a.subSort.Descending {
+			return cmp > 0
+		}
+		return cmp < 0
 	})
 }
 
@@ -1168,7 +1487,7 @@ func main() {
 	// The software rasterizer uses much less memory than the GPU, which the
 	// patched mygo asks for when MYGO_WARP is set. macOS draws with Metal,
 	// which has no software fallback, so the setting does nothing there.
-	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
+	a := &app{cfg: loadConfig(), cursor: -1, subCursor: -1, tests: map[string]*testState{}}
 	if a.cfg.Global.SoftRender {
 		switch runtime.GOOS {
 		case "windows":
