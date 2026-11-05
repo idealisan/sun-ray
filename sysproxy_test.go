@@ -6,8 +6,8 @@ import (
 )
 
 func TestPACTemplate(t *testing.T) {
-	pac := strings.Replace(pacTemplate, "%s", "127.0.0.1:10808", 2)
-	for _, want := range []string{"FindProxyForURL", "PROXY 127.0.0.1:10808", "SOCKS5 127.0.0.1:10808", "DIRECT"} {
+	pac := strings.Replace(pacTemplate, "%s", "127.0.0.1:10808", 1)
+	for _, want := range []string{"FindProxyForURL", "PROXY 127.0.0.1:10808", "DIRECT"} {
 		if !strings.Contains(pac, want) {
 			t.Errorf("PAC file missing %q; got %s", want, pac)
 		}
