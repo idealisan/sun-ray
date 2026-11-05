@@ -38,6 +38,7 @@
 sun-ray/
 ├── main.go       # GUI：mygo 原生 UI（窗口、表单、按钮、日志）
 ├── core.go       # xray-core 进程内封装：配置生成、启停、日志、流量
+├── subscription.go # 订阅拉取、分享链接解析与节点导入
 ├── main_test.go  # headless UI 测试 + 内核启停冒烟测试
 ├── integration/  # 按协议端到端测试（本地上游 + curl）
 ├── go.mod        # replace ./mygo、./xray-core
@@ -158,6 +159,7 @@ git push origin v0.1.0
 
 - 入站：本机 SOCKS5 + HTTP 代理，端口可配，可允许局域网
 - 出站协议：vless / vmess / trojan / shadowsocks / freedom，可配 TLS 与 SNI
+- 订阅管理：新增、编辑、复制、删除和批量删除；从订阅 URL 拉取 Base64 或明文节点链接（VLESS / VMess / Trojan / Shadowsocks / Hysteria2），更新时保留同名节点的测量结果
 - 启动 / 停止：直接调用 `core.Instance` 的函数，无子进程
 - 实时流量速率（每秒采样 xray stats 计数器）
 - 运行日志面板（xray 日志经 `log.RegisterHandler` 回调到 GUI）
@@ -170,7 +172,7 @@ git push origin v0.1.0
 ## Roadmap
 
 - [ ] 配置持久化（保存/加载服务器列表）
-- [ ] 订阅导入
+- [x] 订阅导入（常见分享链接）
 - [ ] 路由规则编辑（分流、黑白名单）
 - [ ] 系统代理一键设置（各平台）
 - [ ] 更多传输层：WebSocket / gRPC / REALITY

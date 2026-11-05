@@ -759,6 +759,9 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 			if ui.Button(c.Key("subdelsel"), "删除").Clicked() {
 				a.deleteSelectedSubscriptions()
 			}
+			if ui.Button(c.Key("subupdate"), "更新").Disabled(len(a.cfg.Subscriptions) == 0 || len(a.subUpdating) > 0).Clicked() {
+				a.updateSelectedSubscriptions()
+			}
 			ui.Text(c, fmt.Sprintf("共 %d 个", len(a.cfg.Subscriptions))).TextColor(t.TextMuted).Grow(1)
 		})
 
@@ -778,9 +781,14 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 				case 1:
 					ui.Text(c, s.URL).SingleLine()
 				case 2:
-					if s.ServerCount > 0 {
+					switch {
+					case a.subUpdating[s.ID]:
+						ui.Text(c, "更新中…")
+					case s.ServerCount > 0:
 						ui.Text(c, strconv.Itoa(s.ServerCount))
-					} else {
+					case s.LastError != "":
+						ui.Text(c, "失败")
+					default:
 						ui.Text(c, "-")
 					}
 				case 3:
@@ -793,6 +801,9 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 				}
 				if m.Item("复制").Chosen() {
 					a.duplicateSubscription(s.ID)
+				}
+				if m.Item("更新").Chosen() {
+					a.updateSubscriptions([]string{s.ID})
 				}
 				m.Separator()
 				if m.Item("删除").Chosen() {

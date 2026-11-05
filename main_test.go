@@ -42,7 +42,7 @@ func TestViewSubscriptionList(t *testing.T) {
 	}}
 	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"订阅", "新增", "编辑", "复制", "删除", "名称", "订阅地址", "节点", "更新时间", "共 1 个", "test-sub", "https://example.com/sub"} {
+	for _, want := range []string{"订阅", "新增", "编辑", "复制", "删除", "更新", "名称", "订阅地址", "节点", "更新时间", "共 1 个", "test-sub", "https://example.com/sub"} {
 		if !tt.HasText(want) {
 			t.Errorf("subscription list missing text %q; texts: %v", want, tt.Texts())
 		}
