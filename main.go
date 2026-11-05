@@ -54,6 +54,13 @@ type app struct {
 	lastSort ui.SortOrder
 }
 
+// logVersion writes the version as the first line of the log.
+func (a *app) logVersion() {
+	a.win.Update(func() {
+		a.logs = append(a.logs, "Sun Ray "+versionString())
+	})
+}
+
 func (a *app) addLog(line string) {
 	// Tell the two cores apart: the one the user runs and the temporary
 	// one a speed test starts.
@@ -182,6 +189,21 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+			ui.Text(c, "系统代理").Bold()
+			ui.Field(c, "代理模式", func() {
+				ui.RadioGroup(c, func() {
+					ui.Row(c).Gap(14).Children(func() {
+						for _, mode := range proxyModeOptions {
+							ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
+						}
+					})
+				})
+			})
+			if ui.Button(c.Key("clearsysproxy"), "清空系统代理").Clicked() {
+				g.ProxyMode = proxyModeOff
+				a.clearSystemProxySetting()
+			}
+			a.syncSystemProxy(g)
 			ui.Text(c, "日志").Bold()
 			renderChoice(c, "日志级别", &g.LogLevel, logLevels)
 
@@ -760,6 +782,7 @@ func main() {
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		a.saver.maybeSave(a.cfg, true)
 		_ = a.core.Stop()
+		a.restoreSystemProxy()
 		if a.tray != nil {
 			a.tray.Destroy()
 			a.tray = nil
@@ -778,6 +801,9 @@ func main() {
 			Content: ui.View(a.view),
 		})
 		_ = a.win.SetIcon(appIconPNG)
+		// The version is the first line of the log, so it is easy to
+		// find out which build is running.
+		a.logVersion()
 		a.win.OnClose(func(e *mygo.CloseEvent) {
 			// Closing the main window keeps the app in the tray. Without a
 			// tray there would be no way back, so let it close normally.

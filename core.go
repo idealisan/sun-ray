@@ -30,7 +30,8 @@ type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
 
-	LogLevel string `json:"logLevel"`
+	LogLevel  string `json:"logLevel"`
+	ProxyMode string `json:"proxyMode"` // off, manual, pac
 	RouteCN  bool   `json:"routeCN"`  // direct traffic to mainland China sites/IPs
 	RouteAds bool   `json:"routeAds"` // block ad domains
 }
