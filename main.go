@@ -870,7 +870,7 @@ func (a *app) setUpTray() {
 		ID:             "sun-ray",
 		Icon:           icon,
 		IconIsTemplate: template,
-		ToolTip:        "Sun Ray",
+		ToolTip:        a.trayTipText(),
 	})
 	if err != nil {
 		log.Print("tray: ", err)
