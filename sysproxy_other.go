@@ -11,7 +11,7 @@ import (
 )
 
 // applyLinuxProxy sets the GNOME proxy for the current user.
-func applyLinuxProxy(action, addr string) error {
+func applySystemProxyPlatform(action, addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err

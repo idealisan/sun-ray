@@ -12,7 +12,7 @@ const internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet 
 
 // applyWindowsProxy points the system at the local proxy or at the PAC
 // file.
-func applyWindowsProxy(action, addr string) error {
+func applySystemProxyPlatform(action, addr string) error {
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, internetSettingsKey, registry.SET_VALUE|registry.QUERY_VALUE)
 	if err != nil {
 		return err

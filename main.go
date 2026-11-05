@@ -29,16 +29,18 @@ const (
 )
 
 type app struct {
-	cfg        appConfig
-	core       xrayCore
-	win        *mygo.Window
-	tray       *mygo.Tray
-	trayToggle *mygo.MenuItem        // start/stop entry in the tray menu
-	quitting   bool                  // a real quit is under way, so closing may proceed
-	tab        int                   // selected tab in the main window
-	saver      configSaver           // debounced persistence to ~/sunray.json
-	tests      map[string]*testState // per server measurement results
-	testing    bool                  // a measurement run is in progress
+	cfg           appConfig
+	core          xrayCore
+	win           *mygo.Window
+	tray          *mygo.Tray
+	trayToggle    *mygo.MenuItem        // start/stop entry in the tray menu
+	quitting      bool                  // a real quit is under way, so closing may proceed
+	tab           int                   // selected tab in the main window
+	saver         configSaver           // debounced persistence to ~/sunray.json
+	tests         map[string]*testState // per server measurement results
+	lastProxyMode string                // the mode the system proxy was set to
+	lastProxyAddr string                // the address it was set to
+	testing       bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
 
@@ -267,7 +269,7 @@ func (a *app) serverListTab(c *ui.Context) {
 				switch col {
 				case 0:
 					if s.ID == a.cfg.ActiveID {
-						ui.Text(c, "✓").TextColor(t.Accent)
+						ui.Text(c, "✓")
 					}
 				case 1:
 					ui.Text(c, s.displayName()).SingleLine()

@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -57,14 +56,7 @@ func applySystemProxy(action, addr string) error {
 	if action == proxyActionClear {
 		return clearSystemProxy()
 	}
-	switch runtime.GOOS {
-	case "windows":
-		return applyWindowsProxy(action, addr)
-	case "darwin":
-		return applyDarwinProxy(action, addr)
-	default:
-		return applyLinuxProxy(action, addr)
-	}
+	return applySystemProxyPlatform(action, addr)
 }
 
 // pacFileURL writes the PAC file and returns the URL for it.

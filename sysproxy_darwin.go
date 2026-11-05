@@ -10,7 +10,7 @@ import (
 )
 
 // applyDarwinProxy configures every enabled network service.
-func applyDarwinProxy(action, addr string) error {
+func applySystemProxyPlatform(action, addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
