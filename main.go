@@ -265,6 +265,7 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
 			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）")
+			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，动画略卡）")
 			a.syncEnvProxy(g)
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
@@ -861,6 +862,11 @@ func main() {
 	}
 	if os.Getenv("GOGC") == "" {
 		debug.SetGCPercent(50)
+	}
+	// The software rasterizer uses much less memory than the GPU, which the
+	// patched mygo asks for when MYGO_WARP is set.
+	if a.cfg.Global.SoftRender {
+		os.Setenv("MYGO_WARP", "1")
 	}
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)

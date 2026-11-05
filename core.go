@@ -29,12 +29,13 @@ type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
 
-	LogLevel  string `json:"logLevel"`
-	ProxyMode string `json:"proxyMode"` // off, manual, pac
-	AutoStart bool   `json:"autoStart"` // start the core when the app starts
-	EnvProxy  bool   `json:"envProxy"`  // set the proxy environment variables for the user
-	RouteCN   bool   `json:"routeCN"`   // direct traffic to mainland China sites/IPs
-	RouteAds  bool   `json:"routeAds"`  // block ad domains
+	LogLevel   string `json:"logLevel"`
+	ProxyMode  string `json:"proxyMode"`  // off, manual, pac
+	AutoStart  bool   `json:"autoStart"`  // start the core when the app starts
+	EnvProxy   bool   `json:"envProxy"`   // set the proxy environment variables for the user
+	SoftRender bool   `json:"softRender"` // draw with the software rasterizer, which uses less memory
+	RouteCN    bool   `json:"routeCN"`    // direct traffic to mainland China sites/IPs
+	RouteAds   bool   `json:"routeAds"`   // block ad domains
 }
 
 // serverConfig is one entry of the server list; protocolSpec binds into it.

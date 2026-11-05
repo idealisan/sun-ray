@@ -1,5 +1,5 @@
 diff --git a/internal/gpu/d3d11/device/device.go b/internal/gpu/d3d11/device/device.go
-index 58d4df5..37fef19 100644
+index 58d4df5..de6e72f 100644
 --- a/internal/gpu/d3d11/device/device.go
 +++ b/internal/gpu/d3d11/device/device.go
 @@ -9,6 +9,7 @@ package device
@@ -10,17 +10,7 @@ index 58d4df5..37fef19 100644
  	"syscall"
  	"unsafe"
  )
-@@ -29,6 +30,9 @@ func SystemDir() string {
- // New creates a Direct3D 11 device and its immediate context, on the GPU
- // or, when there is none, with Windows' software rasterizer (WARP), which
- // software reports. The caller releases the device and the context.
-+//
-+// MYGO_WARP=1 asks for the software rasterizer first, which some apps do
-+// to keep the driver overhead and the memory low.
- func New() (device, context uintptr, software bool, err error) {
- 	if err := procD3D11CreateDevice.Find(); err != nil {
- 		return 0, 0, false, err
-@@ -37,7 +41,11 @@ func New() (device, context uintptr, software bool, err error) {
+@@ -37,7 +38,11 @@ func New() (device, context uintptr, software bool, err error) {
  	const bgraSupport = 0x20
  	const hardware, warp = 1, 5
  	var hr uintptr
@@ -33,10 +23,3 @@ index 58d4df5..37fef19 100644
  		var level uint32
  		hr, _, _ = procD3D11CreateDevice.Call(0, driver, 0, bgraSupport,
  			uintptr(unsafe.Pointer(&levels[0])), uintptr(len(levels)), 7,
-@@ -47,4 +55,4 @@ func New() (device, context uintptr, software bool, err error) {
- 		}
- 	}
- 	return 0, 0, false, fmt.Errorf("d3d11: cannot create a device: %#x", uint32(hr))
--}
-+}
-\ No newline at end of file
