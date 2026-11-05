@@ -24,7 +24,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/xtls/xray-core/common/log"
+	xlog "github.com/xtls/xray-core/common/log"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func main() {
 		return
 	}
 
-	path := *configPath
+	path := *configFile
 	if path == "" {
 		path = configPath()
 	}
@@ -66,7 +66,7 @@ func main() {
 	defer inst.Close()
 
 	// The core logs to the handler, which prints to the standard output.
-	log.RegisterHandler(&guiHandler{fn: printLine})
+	xlog.RegisterHandler(&guiHandler{fn: printLine})
 	fmt.Printf("Sun Ray %s, no interface, server: %s (%s), local port %s\n",
 		versionString(), s.displayName(), s.Protocol, cfg.Global.ListenPort)
 
