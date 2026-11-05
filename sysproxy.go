@@ -2,10 +2,7 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"os"
-	"path/filepath"
-	"strings"
+	"time"
 )
 
 // Proxy modes, also the values stored in the config.

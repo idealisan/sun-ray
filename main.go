@@ -48,6 +48,8 @@ type app struct {
 	pac           *pacServer            // the local server that serves the PAC file
 	lastConfig    string                // fingerprint of the config the core runs with
 	restartAt     time.Time             // when to restart the core after a change
+	lastEnvProxy  bool                  // the env proxy setting the system has
+	lastEnvAddr   string                // the address it was set to
 	testing       bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
@@ -64,7 +66,31 @@ type app struct {
 	lastSort ui.SortOrder
 }
 
-// configFingerprint describes the settings the core runs with, so the app
+// syncEnvProxy sets the proxy environment variables for the user. Windows
+// gets real user variables, macOS and Linux get the shell commands
+// copied to the clipboard.
+func (a *app) syncEnvProxy(g *globalConfig) {
+	addr := "127.0.0.1:" + g.ListenPort
+	if g.EnvProxy == a.lastEnvProxy && addr == a.lastEnvAddr {
+		return
+	}
+	a.lastEnvProxy, a.lastEnvAddr = g.EnvProxy, addr
+	commands, err := applyEnvProxy(g.EnvProxy, addr)
+	if err != nil {
+		a.addLog("[sun-ray] 代理环境变量设置失败: " + err.Error())
+		return
+	}
+	if commands != "" {
+		mygo.Clipboard.WriteText(commands)
+		a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
+		return
+	}
+	if g.EnvProxy {
+		a.addLog("[sun-ray] 已设置代理环境变量：" + addr)
+	} else {
+		a.addLog("[sun-ray] 已清除代理环境变量")
+	}
+} // configFingerprint describes the settings the core runs with, so the app
 // can tell when a change needs the core to restart.
 func (a *app) configFingerprint() string {
 	global := a.cfg.Global
@@ -234,6 +260,8 @@ func (a *app) globalTab(c *ui.Context) {
 			})
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
+			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）")
+			a.syncEnvProxy(g)
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "系统代理").Bold()

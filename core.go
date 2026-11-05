@@ -33,6 +33,7 @@ type globalConfig struct {
 	LogLevel  string `json:"logLevel"`
 	ProxyMode string `json:"proxyMode"` // off, manual, pac
 	AutoStart bool   `json:"autoStart"` // start the core when the app starts
+	EnvProxy  bool   `json:"envProxy"`  // set the proxy environment variables for the user
 	RouteCN   bool   `json:"routeCN"`   // direct traffic to mainland China sites/IPs
 	RouteAds  bool   `json:"routeAds"`  // block ad domains
 }
