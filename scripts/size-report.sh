@@ -13,8 +13,17 @@ build() {
   printf "%-12s %10s\n" "$name" "$(du -h "dist/$name" | cut -f1)"
 }
 
+build_win() {
+  local name=$1 pkg=$2
+  GOOS=windows GOARCH=amd64 go build "${FLAGS[@]}" -o "dist/$name.exe" "$pkg"
+  printf "%-12s %10s\n" "$name.exe" "$(du -h "dist/$name.exe" | cut -f1)"
+}
+
 mkdir -p dist
 echo "binary        size"
 build app        .
 build probe-ui   ./cmd/probe-ui
 build probe-core ./cmd/probe-core
+echo "windows probes"
+build_win probe-ui   ./cmd/probe-ui
+build_win probe-core ./cmd/probe-core
