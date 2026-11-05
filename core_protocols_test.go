@@ -12,9 +12,12 @@ func TestCoreStartsForEveryProtocol(t *testing.T) {
 		c := defaultServerConfig()
 		c.Protocol = proto
 		c.Address, c.Port, c.Secret = "127.0.0.1", "1", "testsecret"
-		c.PeerKey = "peerpublickey"
+		c.PeerKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // a valid key
 		c.Security = "tls"
 		c.SNI = "example.com"
+		if proto == "wireguard" {
+			c.Secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		}
 		g := defaultGlobalConfig()
 		g.ListenPort = "39450"
 		data, err := c.buildJSON(&g)
