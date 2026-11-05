@@ -12,6 +12,4 @@ node_modules/
 .vscode/
 
 # local scratch scripts
-_fix*.py
-_r*.py
-_m*.py
+_*.py
