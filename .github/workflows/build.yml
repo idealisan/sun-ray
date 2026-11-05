@@ -111,6 +111,14 @@ jobs:
           done
           ls -l dist
 
+      - name: Check the headless binary
+        run: |
+          ./dist/sun-ray-nogui-linux-amd64 -version
+          cat > /tmp/sunray-test.json <<'JSON'
+          {"global":{"listenPort":"39470","logLevel":"info"},"servers":[{"id":"t","name":"test","protocol":"freedom","network":"tcp","security":"none"}],"activeId":"t"}
+          JSON
+          timeout 5 ./dist/sun-ray-nogui-linux-amd64 -config /tmp/sunray-test.json || true
+
       - name: Upload the headless binaries
         uses: actions/upload-artifact@v4
         with:
