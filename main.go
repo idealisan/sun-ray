@@ -54,6 +54,7 @@ type app struct {
 	restartAt     time.Time             // when to restart the core after a change
 	lastEnvProxy  bool                  // the env proxy setting the system has
 	lastEnvAddr   string                // the address it was set to
+	lastTrayTip   string                // the hover text the tray shows
 	testing       bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
@@ -96,6 +97,48 @@ func (a *app) syncEnvProxy(g *globalConfig) {
 	} else {
 		a.addLog("[sun-ray] 已清除代理环境变量")
 	}
+} // routingModeLabel names the routing in a few words, for the tray tip.
+func routingModeLabel(g globalConfig) string {
+	switch {
+	case g.RouteCN && g.RouteAds:
+		return "分流·大陆直连+拦截广告"
+	case g.RouteCN:
+		return "分流·大陆直连"
+	case g.RouteAds:
+		return "分流·拦截广告"
+	default:
+		return "全部代理"
+	}
+}
+
+// trayTipText is the hover text of the tray icon: the server in use, the
+// current speeds and the routing mode.
+func (a *app) trayTipText() string {
+	name := "未选择服务器"
+	if s := a.activeServer(); s != nil {
+		name = s.displayName()
+	}
+	up, down := a.upSpeed, a.downSpeed
+	if up == "" {
+		up = "—"
+	}
+	if down == "" {
+		down = "—"
+	}
+	return fmt.Sprintf("Sun Ray · %s · ↑%s ↓%s · %s", name, up, down, routingModeLabel(a.cfg.Global))
+}
+
+// updateTrayTip refreshes the tray hover text, when it changed.
+func (a *app) updateTrayTip() {
+	if a.tray == nil {
+		return
+	}
+	tip := a.trayTipText()
+	if tip == a.lastTrayTip {
+		return
+	}
+	a.lastTrayTip = tip
+	a.tray.SetToolTip(tip)
 } // configFingerprint describes the settings the core runs with, so the app
 // can tell when a change needs the core to restart.
 func (a *app) configFingerprint() string {
@@ -196,6 +239,7 @@ func (a *app) pollTraffic() {
 		a.win.Update(func() {
 			a.upSpeed = fmtBytes(upRate) + "/s"
 			a.downSpeed = fmtBytes(downRate) + "/s"
+			a.updateTrayTip()
 		})
 	}
 }
@@ -292,6 +336,7 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Text(c, "路由预设").Bold()
 			ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
 			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
+			a.updateTrayTip()
 		})
 	})
 }
@@ -562,6 +607,7 @@ func (a *app) setActive(id string) {
 		return
 	}
 	a.cfg.ActiveID = id
+	a.updateTrayTip()
 }
 
 // cursorServerID is the server the keyboard acts on: the cursor row, or the
