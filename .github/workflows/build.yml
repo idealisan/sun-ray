@@ -95,6 +95,9 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Apply embedded-assets patch to xray-core
+        run: git -C xray-core apply --whitespace=nowarn ../patches/xray-core-embedded-assets.patch
+
       - name: Build the app and the probes
         run: bash scripts/size-report.sh
 
