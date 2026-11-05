@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,7 @@ type tunHelper struct {
 	reader   *bufio.Reader
 	done     chan struct{}
 	settings tunHelperSettings
+	stopping atomic.Bool
 }
 
 // startTunHelper launches the privileged helper and waits until its TUN
@@ -123,7 +125,9 @@ func (h *tunHelper) readLoop(logf func(string)) {
 	for {
 		line, err := h.reader.ReadString('\n')
 		if err != nil {
-			logf("[sun-ray] TUN 辅助进程已退出")
+			if !h.stopping.Load() {
+				logf("[sun-ray] TUN 辅助进程已退出")
+			}
 			return
 		}
 		line = strings.TrimSpace(line)
@@ -139,6 +143,7 @@ func (h *tunHelper) readLoop(logf func(string)) {
 // stop asks the helper to remove the TUN interface and waits briefly for
 // it to exit.
 func (h *tunHelper) stop() {
+	h.stopping.Store(true)
 	_, _ = fmt.Fprintln(h.conn, "STOP")
 	_ = h.conn.Close()
 	select {

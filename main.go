@@ -17,6 +17,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -60,6 +61,9 @@ type app struct {
 	lastTrayTip    string                // the hover text the tray shows
 	tunWarningText string                // why the TUN interface cannot be created
 	testing        bool                  // a measurement run is in progress
+	opMu           sync.Mutex            // serializes start/stop/restart
+	tunMu          sync.Mutex            // protects tunHelper
+	tunHelper      *tunHelper            // the privileged TUN helper, when running
 
 	logs     []string // xray log lines, newest last
 	logChars int      // total rune count of logs when joined with newlines
@@ -194,10 +198,25 @@ func (a *app) watchConfig() {
 	go a.restartCore()
 }
 
-// restartCore stops and starts the core with the current settings.
+// restartCore stops and starts the core with the current settings. When
+// only the in-process settings changed, a running TUN helper is kept, so
+// the user is not asked for administrator rights again.
 func (a *app) restartCore() {
-	a.stop()
-	a.start()
+	a.opMu.Lock()
+	defer a.opMu.Unlock()
+
+	g := a.cfg.Global
+	if g.TunEnabled {
+		if iface, err := defaultRouteInterface(); err == nil {
+			if h := a.currentTunHelper(); h != nil && sameTun(h.settings, tunSettingsFor(&g, iface, h.settings.TunName)) {
+				_ = a.core.Stop()
+				a.startLocked()
+				return
+			}
+		}
+	}
+	a.stopLocked()
+	a.startLocked()
 }
 
 // logVersion writes the version as the first line of the log.
@@ -253,6 +272,12 @@ func appendLogLine(logs []string, chars int, line string, limit int) ([]string, 
 // start validates the active server, builds the config and boots the
 // in-process core, all through function calls.
 func (a *app) start() {
+	a.opMu.Lock()
+	defer a.opMu.Unlock()
+	a.startLocked()
+}
+
+func (a *app) startLocked() {
 	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
 	s := a.activeServer()
@@ -260,13 +285,57 @@ func (a *app) start() {
 		a.addLog("[sun-ray] 没有可用的服务器")
 		return
 	}
-	if a.cfg.Global.TunEnabled {
-		if msg := tunPrivilegeError(); msg != "" {
+
+	g := a.cfg.Global
+	if g.TunEnabled {
+		if msg := tunSupportWarning(); msg != "" {
 			a.addLog("[sun-ray] " + msg)
 			return
 		}
+		iface, err := defaultRouteInterface()
+		if err != nil {
+			a.addLog("[sun-ray] TUN 模式找不到默认路由的网卡: " + err.Error())
+			return
+		}
+		if h := a.currentTunHelper(); h != nil && !sameTun(h.settings, tunSettingsFor(&g, iface, h.settings.TunName)) {
+			a.stopTunHelper()
+		}
+		g.TunHelper = true
+		g.TunBypassInterface = iface
+
+		cfgJSON, err := s.buildJSON(&g)
+		if err != nil {
+			a.addLog("[sun-ray] " + err.Error())
+			return
+		}
+		if err := a.core.Start(cfgJSON, a.addLog); err != nil {
+			a.addLog("[sun-ray] 启动失败: " + err.Error())
+			a.stopTunHelper()
+			return
+		}
+		if a.currentTunHelper() == nil {
+			if _, err := a.startTunHelper(&g, iface); err != nil {
+				_ = a.core.Stop()
+				if err == errElevationCancelled {
+					a.addLog("[sun-ray] 已取消 TUN 权限请求")
+				} else {
+					a.addLog("[sun-ray] TUN 辅助进程启动失败: " + err.Error())
+				}
+				a.updateTrayIcon()
+				return
+			}
+			a.addLog("[sun-ray] TUN 辅助进程已启动")
+		}
+		a.addLog("[sun-ray] 内核已在本进程内启动")
+		a.addLog("[sun-ray] TUN 已接管全部流量")
+		a.updateTrayIcon()
+		return
 	}
-	cfgJSON, err := s.buildJSON(&a.cfg.Global)
+
+	a.stopTunHelper()
+	g.TunHelper = false
+	g.TunBypassInterface = ""
+	cfgJSON, err := s.buildJSON(&g)
 	if err != nil {
 		a.addLog("[sun-ray] " + err.Error())
 		return
@@ -280,14 +349,52 @@ func (a *app) start() {
 }
 
 func (a *app) stop() {
+	a.opMu.Lock()
+	defer a.opMu.Unlock()
+	a.stopLocked()
+}
+
+func (a *app) stopLocked() {
 	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
 	if err := a.core.Stop(); err != nil {
 		a.addLog("[sun-ray] 停止出错: " + err.Error())
-		return
 	}
+	a.stopTunHelper()
 	a.addLog("[sun-ray] 内核已停止")
 	a.updateTrayIcon()
+}
+
+// currentTunHelper returns the running helper, if any.
+func (a *app) currentTunHelper() *tunHelper {
+	a.tunMu.Lock()
+	defer a.tunMu.Unlock()
+	return a.tunHelper
+}
+
+// startTunHelper launches the helper and records it. The caller holds
+// opMu; tunMu only guards the pointer.
+func (a *app) startTunHelper(g *globalConfig, iface string) (*tunHelper, error) {
+	a.tunMu.Lock()
+	defer a.tunMu.Unlock()
+	h, err := startTunHelper(g, iface, a.addLog)
+	if err != nil {
+		return nil, err
+	}
+	a.tunHelper = h
+	return h, nil
+}
+
+// stopTunHelper removes the TUN interface and clears the pointer.
+func (a *app) stopTunHelper() {
+	a.tunMu.Lock()
+	h := a.tunHelper
+	a.tunHelper = nil
+	a.tunMu.Unlock()
+	if h != nil {
+		h.stop()
+		a.addLog("[sun-ray] TUN 辅助进程已停止")
+	}
 }
 
 // pollTraffic samples the stats counters once a second from a goroutine,
@@ -378,7 +485,7 @@ func (a *app) globalTab(c *ui.Context) {
 			a.syncEnvProxy(g)
 
 			ui.Text(c, "TUN 模式").Bold()
-			ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，需要管理员权限）")
+			ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，启动时请求管理员权限）")
 			if g.TunEnabled {
 				ui.Field(c, "接口名", func() {
 					ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
@@ -436,7 +543,7 @@ func (a *app) globalTab(c *ui.Context) {
 // case. The rights do not change while the app runs, so it asks once.
 func (a *app) tunWarning() string {
 	if a.tunWarningText == "" {
-		a.tunWarningText = tunPrivilegeError()
+		a.tunWarningText = tunSupportWarning()
 	}
 	return a.tunWarningText
 }
@@ -1004,6 +1111,12 @@ func (a *app) setUpTray() {
 }
 
 func main() {
+	// The same executable is the privileged helper when the app launches
+	// it with -tun-helper. Handle that before any UI initialization.
+	if runTunHelperIfRequested() {
+		return
+	}
+
 	// Keep the resident size in check: the core and the UI together do not
 	// need much, and a tighter heap costs a little CPU. GOMEMLIMIT and GOGC
 	// in the environment win, so the user can tune the footprint.
@@ -1034,6 +1147,7 @@ func main() {
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		a.saver.maybeSave(a.cfg, true)
 		_ = a.core.Stop()
+		a.stopTunHelper()
 		a.restoreSystemProxy()
 		if a.tray != nil {
 			a.tray.Destroy()

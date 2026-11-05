@@ -95,6 +95,10 @@ func (a *app) measureServer(s serverConfig) (time.Duration, float64, error) {
 		return 0, 0, err
 	}
 	g := &globalConfig{ListenPort: tempPortString(port), LogLevel: "info"}
+	if h := a.currentTunHelper(); h != nil {
+		// TUN owns the default route; keep the measurement out of it.
+		g.TunBypassInterface = h.settings.Iface
+	}
 	data, err := s.buildJSON(g)
 	if err != nil {
 		return 0, 0, err

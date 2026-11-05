@@ -18,7 +18,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,6 +81,30 @@ func tunSettingsFor(g *globalConfig, iface, currentName string) tunHelperSetting
 }
 
 func sameTun(a, b tunHelperSettings) bool { return a == b }
+
+// tunSupportWarning says whether this system can show an administrator
+// prompt for the helper, or why it cannot. An empty string means TUN mode
+// can be started without launching Sun Ray as root.
+func tunSupportWarning() string {
+	switch runtime.GOOS {
+	case "darwin":
+		if _, err := os.Stat("/usr/bin/osascript"); err != nil {
+			return "TUN 模式需要 /usr/bin/osascript 来请求管理员权限"
+		}
+		return ""
+	case "linux":
+		if os.Geteuid() == 0 {
+			return ""
+		}
+		if _, err := exec.LookPath("pkexec"); err != nil {
+			return "TUN 模式需要 pkexec（polkit），请先安装"
+		}
+		return ""
+	case "windows":
+		return ""
+	}
+	return fmt.Sprintf("TUN 模式在 %s 上还不支持", runtime.GOOS)
+}
 
 // runTunHelperIfRequested handles the hidden helper mode before any UI or
 // flag parsing. It exits the process when it was invoked as the helper.

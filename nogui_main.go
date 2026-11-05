@@ -29,6 +29,12 @@ import (
 )
 
 func main() {
+	// The GUI can launch this same executable as its privileged TUN
+	// helper. Handle that before the normal flag parsing.
+	if runTunHelperIfRequested() {
+		return
+	}
+
 	var (
 		configFile  = flag.String("config", "", "the config file to run (default: sunray.json in the home directory)")
 		showVersion = flag.Bool("version", false, "print the version and exit")
@@ -114,6 +120,10 @@ func runHeadlessTest(cfg appConfig, s *serverConfig) {
 	}
 	g := cfg.Global
 	g.ListenPort = strconv.Itoa(port)
+	// The measurement runs through the proxy, not through a TUN interface.
+	g.TunEnabled = false
+	g.TunHelper = false
+	g.TunBypassInterface = ""
 	data, err := s.buildJSON(&g)
 	if err != nil {
 		log.Fatal(err)
