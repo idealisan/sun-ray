@@ -56,7 +56,9 @@ cd sun-ray
 git submodule update --init --recursive
 
 # 构建单二进制（GUI + 内核一体）
-go build -o sun-ray.exe .
+# Windows 必须加 -H windowsgui：Go 默认链接控制台子系统，
+# 双击时会弹出一个控制台窗口；这个链接参数把它改成 GUI 子系统。
+go build -ldflags "-H windowsgui" -o sun-ray.exe .
 
 # 运行测试（headless 渲染，无需窗口）
 go test ./...

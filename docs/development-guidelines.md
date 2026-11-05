@@ -18,6 +18,10 @@
 export GOPROXY=https://goproxy.cn,direct   # 网络受限时
 go build -o sun-ray .
 go test ./...
+
+# Windows 的 GUI 构建要加 -H windowsgui，否则 Go 默认生成控制台
+# 子系统程序，双击运行时会附带一个控制台窗口。
+go build -ldflags "-H windowsgui" -o sun-ray.exe .
 ```
 
 提交前至少跑一遍 `gofmt -w *.go`、`go vet ./...`、`go test ./...`。

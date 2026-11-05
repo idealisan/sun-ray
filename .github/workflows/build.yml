@@ -74,8 +74,15 @@ jobs:
             done
           else
             NAME=sun-ray-${{ matrix.name }}
-            if [ "$RUNNER_OS" = "Windows" ]; then NAME="$NAME.exe"; fi
-            go build -trimpath -ldflags "-s -w" -gcflags "all=-l" -tags mygo_noinspector -o "$NAME" .
+            LDFLAGS="-s -w"
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              NAME="$NAME.exe"
+              # Go links a console-subsystem binary by default, so a
+              # double-click opens a console. The GUI build must be a
+              # windowsgui binary; the -tun-helper mode inherits that.
+              LDFLAGS="-s -w -H windowsgui"
+            fi
+            go build -trimpath -ldflags "$LDFLAGS" -gcflags "all=-l" -tags mygo_noinspector -o "$NAME" .
           ls -l "$NAME"
           fi
 
