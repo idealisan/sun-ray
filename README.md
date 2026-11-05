@@ -87,6 +87,38 @@ git -C xray-core apply ../patches/xray-core-embedded-assets.patch
 
 若更新子模块，需确认补丁仍可应用（必要时重新生成）。
 
+## 无界面版（Linux）
+
+`sun-ray-nogui-linux-amd64` / `-arm64` 是同一份代码的**无界面构建**：跑的是同一个 xray-core、读同一份 `sunray.json`，只是没有界面。它为「在电脑上用 GUI 配好，拷到服务器上跑」的场景而生：
+
+```bash
+# 在 GUI 机器上配好，把 ~/sunray.json 拷到服务器
+scp ~/sunray.json server:/etc/sunray.json
+
+# 在服务器上跑
+sun-ray-nogui-linux-amd64 -config /etc/sunray.json
+```
+
+- 配置格式与 GUI 完全相同（同一个 `sunray.json`），服务器上也**不需要额外的 .dat 文件**：geo 资产已经内嵌在二进制里
+- 日志直接打到标准输出（systemd 下就是 journal），`SIGINT`/`SIGTERM` 会优雅停止内核
+- `-test` 跑一次延迟与速度测量就退出，`-version` 打印版本
+- 无界面版**不碰系统代理与环境变量**（那些是给图形机上的浏览器/终端用的设置）
+
+systemd 单元示例：
+
+```ini
+[Unit]
+Description=Sun Ray
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/sun-ray-nogui-linux-amd64 -config /etc/sunray.json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## CI 与发布
 
 GitHub Actions（`.github/workflows/build.yml`）：
