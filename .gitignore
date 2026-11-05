@@ -13,3 +13,5 @@ node_modules/
 
 # local scratch scripts
 _fix*.py
+_r*.py
+_m*.py
