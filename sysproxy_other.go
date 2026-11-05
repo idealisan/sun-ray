@@ -11,7 +11,7 @@ import (
 )
 
 // applyLinuxProxy sets the GNOME proxy for the current user.
-func applySystemProxyPlatform(action, addr string) error {
+func applySystemProxyPlatform(action, addr, pacURL string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -25,10 +25,6 @@ func applySystemProxyPlatform(action, addr string) error {
 		runQuiet("gsettings", "set", "org.gnome.system.proxy.https", "port", port)
 		runQuiet("gsettings", "set", "org.gnome.system.proxy", "ignore-hosts", "['localhost', '127.0.0.0/8', '::1']")
 	case proxyModePAC:
-		pacURL, err := pacFileURL(addr)
-		if err != nil {
-			return err
-		}
 		runQuiet("gsettings", "set", "org.gnome.system.proxy", "mode", "auto")
 		runQuiet("gsettings", "set", "org.gnome.system.proxy.autoconfig", "url", pacURL)
 	}

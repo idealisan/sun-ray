@@ -12,7 +12,7 @@ const internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet 
 
 // applyWindowsProxy points the system at the local proxy or at the PAC
 // file.
-func applySystemProxyPlatform(action, addr string) error {
+func applySystemProxyPlatform(action, addr, pacURL string) error {
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, internetSettingsKey, registry.SET_VALUE|registry.QUERY_VALUE)
 	if err != nil {
 		return err
@@ -26,10 +26,6 @@ func applySystemProxyPlatform(action, addr string) error {
 		// A PAC file would win over the manual settings.
 		k.DeleteValue("AutoConfigURL")
 	case proxyModePAC:
-		pacURL, err := pacFileURL(addr)
-		if err != nil {
-			return err
-		}
 		k.SetStringValue("AutoConfigURL", pacURL)
 		k.SetDWordValue("ProxyEnable", 0)
 	default:

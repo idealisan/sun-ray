@@ -7,6 +7,7 @@ package main
 // Each server in the list opens its own editor window, reusing serverForm.
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"runtime"
@@ -20,6 +21,10 @@ import (
 )
 
 const maxLogLines = 300
+
+// restartDelay is how long the app waits for the settings to settle before
+// it restarts a running core.
+const restartDelay = 1200 * time.Millisecond
 
 // Tab indexes in the main window.
 const (
@@ -40,6 +45,9 @@ type app struct {
 	tests         map[string]*testState // per server measurement results
 	lastProxyMode string                // the mode the system proxy was set to
 	lastProxyAddr string                // the address it was set to
+	pac           *pacServer            // the local server that serves the PAC file
+	lastConfig    string                // fingerprint of the config the core runs with
+	restartAt     time.Time             // when to restart the core after a change
 	testing       bool                  // a measurement run is in progress
 
 	logs []string // xray log lines, newest last, capped
@@ -56,7 +64,42 @@ type app struct {
 	lastSort ui.SortOrder
 }
 
-// logVersion writes the version as the first line of the log.
+// configFingerprint describes the settings the core runs with, so the app
+// can tell when a change needs the core to restart.
+func (a *app) configFingerprint() string {
+	global := a.cfg.Global
+	global.ProxyMode = "" // not a setting of the core
+	data, _ := json.Marshal(struct {
+		Global globalConfig
+		Server *serverConfig
+	}{global, a.activeServer()})
+	return string(data)
+}
+
+// watchConfig restarts a running core when the settings it runs with
+// changed, so the new settings take effect.
+func (a *app) watchConfig() {
+	fp := a.configFingerprint()
+	if fp != a.lastConfig {
+		a.lastConfig = fp
+		a.restartAt = time.Now().Add(restartDelay)
+		return
+	}
+	if a.restartAt.IsZero() || time.Now().Before(a.restartAt) {
+		return
+	}
+	a.restartAt = time.Time{}
+	if !a.core.Running() {
+		return
+	}
+	go a.restartCore()
+}
+
+// restartCore stops and starts the core with the current settings.
+func (a *app) restartCore() {
+	a.stop()
+	a.start()
+} // logVersion writes the version as the first line of the log.
 func (a *app) logVersion() {
 	a.win.Update(func() {
 		a.logs = append(a.logs, "Sun Ray "+versionString())
@@ -142,6 +185,7 @@ func fmtBytes(n int64) string {
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
 	running := a.core.Running()
+	a.watchConfig()
 	a.saver.maybeSave(a.cfg, false)
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
@@ -189,6 +233,7 @@ func (a *app) globalTab(c *ui.Context) {
 				ui.TextInput(c, &g.ListenPort).Placeholder("10808")
 			})
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
+			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "系统代理").Bold()
@@ -778,6 +823,7 @@ func (a *app) setUpTray() {
 func main() {
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	a.saver.remember(a.cfg)
+	a.lastConfig = a.configFingerprint()
 	mygo.App.SetLocale("zh-Hans")
 	mygo.App.SetName("Sun Ray")
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
@@ -817,6 +863,9 @@ func main() {
 		})
 		a.setUpTray()
 		go a.pollTraffic()
+		if a.cfg.Global.AutoStart {
+			a.start()
+		}
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

@@ -10,7 +10,7 @@ import (
 )
 
 // applyDarwinProxy configures every enabled network service.
-func applySystemProxyPlatform(action, addr string) error {
+func applySystemProxyPlatform(action, addr, pacURL string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -26,10 +26,6 @@ func applySystemProxyPlatform(action, addr string) error {
 			runQuiet("networksetup", "-setsecureproxy", service, host, port)
 			runQuiet("networksetup", "-setproxybypassdomains", service, "localhost", "127.0.0.1", "*.local")
 		case proxyModePAC:
-			pacURL, err := pacFileURL(addr)
-			if err != nil {
-				return err
-			}
 			runQuiet("networksetup", "-setautoproxyurl", service, pacURL)
 			runQuiet("networksetup", "-setautoproxystate", service, "on")
 		}

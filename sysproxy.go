@@ -33,8 +33,8 @@ func proxyModeLabel(mode string) string {
 	}
 }
 
-// pacTemplate is the proxy auto-config file the app writes. It sends
-// everything but local addresses to the local proxy.
+// pacTemplate is the proxy auto-config script the app serves. It sends
+// everything but local addresses to the local proxy, the way v2rayN does.
 const pacTemplate = `function FindProxyForURL(url, host) {
 	if (isPlainHostName(host) ||
 		shExpMatch(host, "*.local") ||
@@ -43,42 +43,20 @@ const pacTemplate = `function FindProxyForURL(url, host) {
 		host == "::1") {
 		return "DIRECT";
 	}
-	return "PROXY %s; SOCKS5 %s; DIRECT";
+	return "PROXY %s; DIRECT;";
 }
 `
 
 // applySystemProxy carries out one action: proxyModeOff leaves the
 // system alone, proxyActionClear removes the proxy settings.
-func applySystemProxy(action, addr string) error {
+func applySystemProxy(action, addr, pacURL string) error {
 	if action == proxyModeOff {
 		return nil
 	}
 	if action == proxyActionClear {
 		return clearSystemProxy()
 	}
-	return applySystemProxyPlatform(action, addr)
-}
-
-// pacFileURL writes the PAC file and returns the URL for it.
-func pacFileURL(addr string) (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	dir = filepath.Join(dir, "sun-ray")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "proxy.pac")
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "", err
-	}
-	content := fmt.Sprintf(pacTemplate, host+":"+port, host+":"+port)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return "file:///" + strings.TrimPrefix(filepath.ToSlash(path), "/"), nil
+	return applySystemProxyPlatform(action, addr, pacURL)
 }
 
 // syncSystemProxy applies the system proxy when the mode or the local
@@ -89,24 +67,51 @@ func (a *app) syncSystemProxy(g *globalConfig) {
 		return
 	}
 	a.lastProxyMode, a.lastProxyAddr = g.ProxyMode, addr
-	if g.ProxyMode == proxyModeOff {
-		return // 不修改：不碰系统设置
+	mode := g.ProxyMode
+	if mode == proxyModeOff {
+		// 不修改：不碰系统设置，但停掉我们自己的 PAC 服务
+		a.stopPACServer()
+		return
 	}
-	mode, target := g.ProxyMode, addr
+	pacURL := ""
+	if mode == proxyModePAC {
+		if a.pac == nil {
+			p, err := startPACServer(addr)
+			if err != nil {
+				a.addLog("[sun-ray] 启动 PAC 服务失败: " + err.Error())
+				return
+			}
+			a.pac = p
+		} else {
+			a.pac.setProxy(addr)
+		}
+		pacURL = fmt.Sprintf("%s?t=%d", a.pac.url, time.Now().UnixNano())
+	} else {
+		a.stopPACServer()
+	}
 	go func() {
-		if err := applySystemProxy(mode, target); err != nil {
+		if err := applySystemProxy(mode, addr, pacURL); err != nil {
 			a.addLog("[sun-ray] 设置系统代理失败: " + err.Error())
 			return
 		}
-		a.addLog("[sun-ray] 已启用" + proxyModeLabel(mode) + "：" + target)
+		a.addLog("[sun-ray] 已启用" + proxyModeLabel(mode) + "：" + addr)
 	}()
+}
+
+// stopPACServer stops the local PAC server, if it runs.
+func (a *app) stopPACServer() {
+	if a.pac != nil {
+		a.pac.stop()
+		a.pac = nil
+	}
 }
 
 // clearSystemProxySetting removes the proxy settings from the system.
 func (a *app) clearSystemProxySetting() {
 	a.lastProxyMode, a.lastProxyAddr = proxyModeOff, ""
+	a.stopPACServer()
 	go func() {
-		if err := applySystemProxy(proxyActionClear, ""); err != nil {
+		if err := applySystemProxy(proxyActionClear, "", ""); err != nil {
 			a.addLog("[sun-ray] 清空系统代理失败: " + err.Error())
 			return
 		}
@@ -117,8 +122,9 @@ func (a *app) clearSystemProxySetting() {
 // restoreSystemProxy removes the proxy the app set, so the system is
 // left as it was when the app quits.
 func (a *app) restoreSystemProxy() {
+	a.stopPACServer()
 	if a.cfg.Global.ProxyMode == proxyModeOff {
 		return
 	}
-	_ = applySystemProxy(proxyActionClear, "")
+	_ = applySystemProxy(proxyActionClear, "", "")
 }

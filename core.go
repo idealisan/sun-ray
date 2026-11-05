@@ -32,8 +32,9 @@ type globalConfig struct {
 
 	LogLevel  string `json:"logLevel"`
 	ProxyMode string `json:"proxyMode"` // off, manual, pac
-	RouteCN  bool   `json:"routeCN"`  // direct traffic to mainland China sites/IPs
-	RouteAds bool   `json:"routeAds"` // block ad domains
+	AutoStart bool   `json:"autoStart"` // start the core when the app starts
+	RouteCN   bool   `json:"routeCN"`   // direct traffic to mainland China sites/IPs
+	RouteAds  bool   `json:"routeAds"`  // block ad domains
 }
 
 // serverConfig is one entry of the server list; protocolSpec binds into it.
@@ -94,7 +95,7 @@ type serverResult struct {
 }
 
 func defaultGlobalConfig() globalConfig {
-	return globalConfig{ListenPort: "10808", LogLevel: "info"}
+	return globalConfig{ListenPort: "10808", LogLevel: "info", RouteCN: true}
 }
 
 func defaultServerConfig() serverConfig {
