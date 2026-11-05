@@ -96,7 +96,7 @@ type serverResult struct {
 }
 
 func defaultGlobalConfig() globalConfig {
-	return globalConfig{ListenPort: "10808", LogLevel: "info", RouteCN: true}
+	return globalConfig{ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true}
 }
 
 func defaultServerConfig() serverConfig {

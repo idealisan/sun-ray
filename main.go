@@ -265,7 +265,7 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
 			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）")
-			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，动画略卡）")
+			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，Windows/Linux 有效）")
 			a.syncEnvProxy(g)
 		})
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
@@ -864,10 +864,17 @@ func main() {
 		debug.SetGCPercent(50)
 	}
 	// The software rasterizer uses much less memory than the GPU, which the
-	// patched mygo asks for when MYGO_WARP is set.
+	// patched mygo asks for when MYGO_WARP is set. macOS draws with Metal,
+	// which has no software fallback, so the setting does nothing there.
 	a := &app{cfg: loadConfig(), cursor: -1, tests: map[string]*testState{}}
 	if a.cfg.Global.SoftRender {
-		os.Setenv("MYGO_WARP", "1")
+		switch runtime.GOOS {
+		case "windows":
+			os.Setenv("MYGO_WARP", "1")
+		case "linux":
+			// Mesa draws on the CPU with llvmpipe.
+			os.Setenv("LIBGL_ALWAYS_SOFTWARE", "1")
+		}
 	}
 	a.saver.remember(a.cfg)
 	a.lastConfig = a.configFingerprint()
