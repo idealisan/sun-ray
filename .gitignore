@@ -10,3 +10,6 @@ node_modules/
 # 编辑器
 .idea/
 .vscode/
+
+# local scratch scripts
+_fix*.py
