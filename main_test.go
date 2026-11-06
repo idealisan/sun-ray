@@ -15,7 +15,7 @@ func TestView(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), cursor: -1}
 	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"Sun Ray", "全局", "服务器列表", "订阅", "日志", "入站（本机代理）", "监听端口", "已停止", "启动", "路由预设", "日志级别"} {
+	for _, want := range []string{"Sun Ray", "全局", "服务器", "订阅", "日志", "入站（本机代理）", "监听端口", "已停止", "启动", "路由预设", "日志级别", "域名解析策略"} {
 		if !tt.HasText(want) {
 			t.Errorf("view missing text %q; texts: %v", want, tt.Texts())
 		}
@@ -27,7 +27,7 @@ func TestViewServerList(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
 	a.saver.remember(a.cfg) // keep the test from writing ~/sunray.json
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"服务器列表", "新增", "编辑", "复制", "删除", "设为当前", "名称", "协议", "地址", "端口", "共 1 个"} {
+	for _, want := range []string{"服务器", "新增", "编辑", "复制", "删除", "设为当前", "名称", "协议", "地址", "端口", "共 1 个"} {
 		if !tt.HasText(want) {
 			t.Errorf("server list missing text %q; texts: %v", want, tt.Texts())
 		}
@@ -453,6 +453,40 @@ func TestBuildJSONErrors(t *testing.T) {
 	c.Port = "443"
 	if _, err := c.buildJSON(&g); err != nil {
 		t.Errorf("want ok config, got %v", err)
+	}
+}
+
+// The routing domainStrategy follows the global setting; empty or unknown
+// values (older configs) fall back to AsIs.
+func TestBuildJSONDomainStrategy(t *testing.T) {
+	g := defaultGlobalConfig()
+	c := defaultServerConfig()
+	c.Address, c.Port, c.Secret = "s.example.com", "443", "uuid"
+
+	data, err := c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"domainStrategy": "AsIs"`) {
+		t.Errorf("default domainStrategy should be AsIs; got %s", data)
+	}
+
+	g.DomainStrategy = "ipifnonmatch"
+	data, err = c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"domainStrategy": "IPIfNonMatch"`) {
+		t.Errorf("config missing IPIfNonMatch; got %s", data)
+	}
+
+	g.DomainStrategy = ""
+	data, err = c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"domainStrategy": "AsIs"`) {
+		t.Errorf("empty domainStrategy should fall back to AsIs; got %s", data)
 	}
 }
 

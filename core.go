@@ -30,20 +30,24 @@ type globalConfig struct {
 	ListenPort string `json:"listenPort"` // one port serves SOCKS and HTTP (mixed inbound)
 	AllowLAN   bool   `json:"allowLAN"`   // listen on 0.0.0.0 instead of 127.0.0.1
 
-	LogLevel   string  `json:"logLevel"`
-	ProxyMode  string  `json:"proxyMode"`  // off, manual, pac
-	AutoStart  bool    `json:"autoStart"`  // start the core when the app starts
-	EnvProxy   bool    `json:"envProxy"`   // set the proxy environment variables for the user
-	SoftRender bool    `json:"softRender"` // draw with the software rasterizer, which uses less memory
-	RouteCN    bool    `json:"routeCN"`    // direct traffic to mainland China sites/IPs
-	RouteAds   bool    `json:"routeAds"`   // block ad domains
-	DNSPreset  string  `json:"dnsPreset"`  // system, ali, ali-doh, cf, cf-doh or custom
-	DNSCustom  string  `json:"dnsCustom"`  // comma/space separated servers for custom
-	TunEnabled bool    `json:"tunEnabled"` // the TUN interface takes all the traffic
-	TunName    string  `json:"tunName"`    // the interface name, empty lets xray pick one
-	TunMTU     float64 `json:"tunMtu"`     // the interface MTU, default 1500
-	TunGateway string  `json:"tunGateway"` // the interface address
-	TunIPv6    bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
+	LogLevel   string `json:"logLevel"`
+	ProxyMode  string `json:"proxyMode"`  // off, manual, pac
+	AutoStart  bool   `json:"autoStart"`  // start the core when the app starts
+	EnvProxy   bool   `json:"envProxy"`   // set the proxy environment variables for the user
+	SoftRender bool   `json:"softRender"` // draw with the software rasterizer, which uses less memory
+	RouteCN    bool   `json:"routeCN"`    // direct traffic to mainland China sites/IPs
+	RouteAds   bool   `json:"routeAds"`   // block ad domains
+
+	// Routing domainStrategy, stored as one of the ds* keys below. Empty
+	// (older configs) means AsIs.
+	DomainStrategy string  `json:"domainStrategy"`
+	DNSPreset      string  `json:"dnsPreset"`  // system, ali, ali-doh, cf, cf-doh or custom
+	DNSCustom      string  `json:"dnsCustom"`  // comma/space separated servers for custom
+	TunEnabled     bool    `json:"tunEnabled"` // the TUN interface takes all the traffic
+	TunName        string  `json:"tunName"`    // the interface name, empty lets xray pick one
+	TunMTU         float64 `json:"tunMtu"`     // the interface MTU, default 1500
+	TunGateway     string  `json:"tunGateway"` // the interface address
+	TunIPv6        bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
 
 	// Runtime-only TUN helper state. The privileged helper owns the TUN
 	// interface, so the in-process core must keep its own connections out
@@ -122,10 +126,36 @@ type serverResult struct {
 	TestedAt  int64   `json:"testedAt"` // unix seconds
 }
 
+// Routing domainStrategy keys, as stored in the config.
+const (
+	dsAsIs         = "asis"         // never resolve domains for routing
+	dsIPIfNonMatch = "ipifnonmatch" // resolve domains only to match IP rules
+)
+
+// domainStrategyOptions drive the picker in the global settings tab.
+var domainStrategyOptions = []struct {
+	Key, Label string
+}{
+	{dsAsIs, "AsIs"},
+	{dsIPIfNonMatch, "IPIfNonMatch"},
+}
+
+// xrayDomainStrategy maps the stored key to the value xray expects; empty
+// or unknown values fall back to AsIs.
+func xrayDomainStrategy(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case dsIPIfNonMatch:
+		return "IPIfNonMatch"
+	default:
+		return "AsIs"
+	}
+}
+
 func defaultGlobalConfig() globalConfig {
 	return globalConfig{
 		ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true,
 		DNSPreset: dnsPresetSystem, TunMTU: defaultTunMTU,
+		DomainStrategy: dsAsIs,
 	}
 }
 
@@ -324,7 +354,7 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 	}
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": g.LogLevel},
-		"routing":   map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
+		"routing":   map[string]any{"domainStrategy": xrayDomainStrategy(g.DomainStrategy), "rules": rules},
 		"outbounds": outbounds,
 		"stats":     map[string]any{},
 		"policy": map[string]any{
