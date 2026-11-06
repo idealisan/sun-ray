@@ -21,6 +21,12 @@ func (a *app) testStateOf(id string) *testState {
 // selected. The servers are tested one after another, so they do not
 // compete for bandwidth.
 func (a *app) runTests() {
+	a.runTestsFor(a.testTargets())
+}
+
+// testTargets is the selection the test button acts on, or every server
+// when nothing is selected.
+func (a *app) testTargets() []string {
 	ids := a.selectedIDs()
 	if len(ids) == 0 {
 		ids = make([]string, 0, len(a.cfg.Servers))
@@ -28,7 +34,7 @@ func (a *app) runTests() {
 			ids = append(ids, a.cfg.Servers[i].ID)
 		}
 	}
-	a.runTestsFor(ids)
+	return ids
 }
 
 // runTestsFor measures the given servers, one after another, so they do

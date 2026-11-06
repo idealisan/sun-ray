@@ -44,8 +44,16 @@ const (
 	tabLog
 )
 
+// Server-list filter values. Empty means every server; the other reserved
+// value shows servers that do not belong to a subscription.
+const (
+	serverFilterAll           = ""
+	serverFilterUncategorized = "__uncategorized__"
+)
+
 type app struct {
 	cfg            appConfig
+	tunMTU         string // text field buffer for the numeric TUN MTU
 	core           xrayCore
 	win            *mygo.Window
 	tray           *mygo.Tray
@@ -76,14 +84,18 @@ type app struct {
 	tempCore atomic.Bool // a temporary core (speed test) is running
 
 	// Server list state.
-	list           ui.ListState
-	chosen         ui.Selection[string] // selected server ids, for batch actions
-	cursor         int                  // row the keyboard acts on, -1 for none
-	sort           ui.SortOrder
-	lastSort       ui.SortOrder
-	listCells      []ui.Handle // rows in the last server list build
-	listCellN      int         // rows bound in listCells this frame
-	clearSelection bool        // a click outside the rows clears the choice
+	list             ui.ListState
+	chosen           ui.Selection[string] // selected server ids, for batch actions
+	cursor           int                  // visible row the keyboard acts on, -1 for none
+	serverRows       []int                // visible rows mapped to a.cfg.Servers
+	serverFilter     string               // all, uncategorized or a subscription id
+	serverFilterName string               // label shown by the filter select
+	serverToolbar    ui.Handle            // toolbar row, where clicks keep the choice
+	sort             ui.SortOrder
+	lastSort         ui.SortOrder
+	listCells        []ui.Handle // rows in the last server list build
+	listCellN        int         // rows bound in listCells this frame
+	clearSelection   bool        // a click outside the rows clears the choice
 
 	// Subscription list state.
 	subList      ui.ListState
@@ -93,6 +105,7 @@ type app struct {
 	subLastSort  ui.SortOrder
 	subListCells []ui.Handle // rows in the last subscription list build
 	subListCellN int         // rows bound in subListCells this frame
+	subToolbar   ui.Handle   // toolbar row, where clicks keep the choice
 	subUpdating  map[string]bool
 }
 
@@ -330,6 +343,7 @@ func (a *app) startLocked() {
 			return
 		}
 		if a.currentTunHelper() == nil {
+			a.addLog("[sun-ray] 正在请求管理员权限并启动 TUN 辅助进程…")
 			if _, err := a.startTunHelper(&g, iface); err != nil {
 				_ = a.core.Stop()
 				if err == errElevationCancelled {
@@ -501,7 +515,10 @@ func (a *app) view(c *ui.Context) {
 			a.subCursor = -1
 		}
 	}).HandleInput(func(ev ui.InputEvent) bool {
-		if ev.Kind == ui.InputPointerDown && ev.Button == 0 && !a.pointerOverListRow(c, ev.X, ev.Y) {
+		// A toolbar click keeps the choice so batch actions still act on it;
+		// clicking the blank part of the list or another tab clears it.
+		if ev.Kind == ui.InputPointerDown && ev.Button == 0 &&
+			!a.pointerOverListRow(c, ev.X, ev.Y) && !a.pointerOverToolbar(c, ev.X, ev.Y) {
 			a.clearSelection = true
 		}
 		return false
@@ -522,6 +539,17 @@ func (a *app) pointerOverListRow(c *ui.Context, x, y float32) bool {
 		}
 	}
 	return false
+}
+
+// pointerOverToolbar reports whether the point is over the current list's
+// toolbar, where a click must not clear the selection batch actions use.
+func (a *app) pointerOverToolbar(c *ui.Context, x, y float32) bool {
+	h := a.serverToolbar
+	if a.tab == tabSubscription {
+		h = a.subToolbar
+	}
+	r := h.Bounds(c)
+	return r.W > 0 && r.H > 0 && x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
 }
 
 // globalTab: inbound ports, sniffing, log level and routing presets.
@@ -546,9 +574,12 @@ func (a *app) globalTab(c *ui.Context) {
 				ui.Field(c, "接口名", func() {
 					ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
 				})
-				ui.Field(c, "MTU", func() {
-					ui.NumberInput(c, &g.TunMTU, 576, 9000, 100)
+				ui.Field(c, "MTU（默认 1500）", func() {
+					ui.TextInput(c, &a.tunMTU).Placeholder("1500")
 				})
+				if mtu, ok := parseTunMTU(a.tunMTU); ok {
+					g.TunMTU = mtu
+				}
 				ui.Field(c, "网关地址", func() {
 					ui.TextInput(c, &g.TunGateway).Placeholder(defaultTunGateway)
 				})
@@ -610,15 +641,27 @@ func (a *app) serverListTab(c *ui.Context) {
 	t := c.Theme()
 	a.applySort()
 	a.listCellN = 0
-	a.list.Key = func(row int) any { return a.cfg.Servers[row].ID }
+	filterKeys, filterNames := a.serverFilterOptions()
+	if !containsString(filterKeys, a.serverFilter) {
+		a.serverFilter = serverFilterAll
+		a.chosen.Clear()
+		a.cursor = -1
+	}
+	a.serverFilterName = serverFilterLabel(filterKeys, filterNames, a.serverFilter)
+	a.serverRows = a.filteredServerRows()
+	a.list.Key = func(row int) any { return a.cfg.Servers[a.serverRows[row]].ID }
 	a.list.Selection = &a.chosen
 	a.list.Selected = &a.cursor
 	a.list.Sort = &a.sort
 
 	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Bind(&a.serverToolbar).Children(func() {
 			if ui.Button(c.Key("srvadd"), "新增").Clicked() {
 				a.addServer()
+				a.serverFilter = serverFilterAll
+				a.serverFilterName = "所有"
+				a.chosen.Clear()
+				a.cursor = -1
 			}
 			if ui.Button(c.Key("srvedit"), "编辑").Clicked() {
 				if id, ok := a.cursorServerID(); ok {
@@ -639,8 +682,19 @@ func (a *app) serverListTab(c *ui.Context) {
 			if ui.Button(c.Key("srvtest"), "测试").Disabled(a.testing).Clicked() {
 				a.runTests()
 			}
-			ui.Text(c, fmt.Sprintf("共 %d 个", len(a.cfg.Servers))).TextColor(t.TextMuted).Grow(1)
+			count := fmt.Sprintf("共 %d 个", len(a.serverRows))
+			if a.serverFilter != serverFilterAll {
+				count = fmt.Sprintf("显示 %d / 共 %d 个", len(a.serverRows), len(a.cfg.Servers))
+			}
+			ui.Text(c, count).TextColor(t.TextMuted).Grow(1)
+			ui.Select(c, &a.serverFilterName, filterNames).Label("服务器筛选").Width(150)
 		})
+		if name := serverFilterLabel(filterKeys, filterNames, a.serverFilter); a.serverFilterName != name {
+			a.serverFilter = serverFilterKey(filterKeys, filterNames, a.serverFilterName)
+			a.chosen.Clear()
+			a.cursor = -1
+		}
+		a.serverRows = a.filteredServerRows()
 
 		cols := []ui.TableColumn{
 			{Title: "当前", ID: "active", Width: 60, Align: ui.Center},
@@ -652,8 +706,9 @@ func (a *app) serverListTab(c *ui.Context) {
 			{Title: "速度", ID: "speed", Width: 110, Align: ui.End},
 		}
 		dbl := -1
-		tbl := ui.Table(c, &a.list, cols, len(a.cfg.Servers), func(row, col int) {
-			s := &a.cfg.Servers[row]
+		var deleteIDs []string
+		tbl := ui.Table(c, &a.list, cols, len(a.serverRows), func(row, col int) {
+			s := &a.cfg.Servers[a.serverRows[row]]
 			cell := ui.Box(c).FillWidth().Children(func() {
 				switch col {
 				case 0:
@@ -707,7 +762,9 @@ func (a *app) serverListTab(c *ui.Context) {
 					a.runTestsFor([]string{s.ID})
 				}
 				if m.Item("删除").Chosen() {
-					a.deleteServers(a.deleteTargets(s.ID))
+					// Removing rows while the table builds them would index
+					// past the shortened list; do it after this build.
+					deleteIDs = a.deleteTargets(s.ID)
 				}
 			})
 			if cell.RowDoubleClicked() {
@@ -720,16 +777,93 @@ func (a *app) serverListTab(c *ui.Context) {
 			a.listCellN++
 		}).Grow(1)
 
+		if len(deleteIDs) > 0 {
+			a.deleteServers(deleteIDs)
+			return
+		}
 		switch {
-		case dbl >= 0:
+		case dbl >= 0 && dbl < len(a.serverRows):
 			a.cursor = dbl
-			a.openEditor(a.cfg.Servers[dbl].ID)
+			a.openEditor(a.cfg.Servers[a.serverRows[dbl]].ID)
 		case tbl.Submitted():
 			if id, ok := a.cursorServerID(); ok {
 				a.setActive(id)
 			}
 		}
 	})
+}
+
+// serverFilterOptions returns the filter values and their labels: all
+// servers, servers without a subscription, then one entry per subscription.
+// Duplicate subscription names get a number so every select option is unique.
+func (a *app) serverFilterOptions() (keys, names []string) {
+	keys = []string{serverFilterAll, serverFilterUncategorized}
+	names = []string{"所有", "未分类"}
+	seen := make(map[string]int, len(a.cfg.Subscriptions))
+	for _, sub := range a.cfg.Subscriptions {
+		name := sub.displayName()
+		seen[name]++
+		if n := seen[name]; n > 1 {
+			name = fmt.Sprintf("%s (%d)", name, n)
+		}
+		keys = append(keys, sub.ID)
+		names = append(names, name)
+	}
+	return keys, names
+}
+
+func serverFilterLabel(keys, names []string, key string) string {
+	for i, k := range keys {
+		if k == key {
+			return names[i]
+		}
+	}
+	return names[0]
+}
+
+func serverFilterKey(keys, names []string, name string) string {
+	for i, n := range names {
+		if n == name {
+			return keys[i]
+		}
+	}
+	return keys[0]
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// filteredServerRows maps the rows shown in the table to indexes in
+// a.cfg.Servers, applying the current subscription filter.
+func (a *app) filteredServerRows() []int {
+	rows := make([]int, 0, len(a.cfg.Servers))
+	for i := range a.cfg.Servers {
+		if a.serverMatchesFilter(&a.cfg.Servers[i]) {
+			rows = append(rows, i)
+		}
+	}
+	return rows
+}
+
+func (a *app) serverMatchesFilter(s *serverConfig) bool {
+	switch a.serverFilter {
+	case serverFilterAll:
+		return true
+	case serverFilterUncategorized:
+		if s.SubscriptionID == "" {
+			return true
+		}
+		_, ok := a.subscriptionByID(s.SubscriptionID)
+		return !ok
+	default:
+		return s.SubscriptionID == a.serverFilter
+	}
 }
 
 // subscriptionListTab: the subscription list. A double click edits a
@@ -744,7 +878,7 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 	a.subList.Sort = &a.subSort
 
 	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Bind(&a.subToolbar).Children(func() {
 			if ui.Button(c.Key("subadd"), "新增").Clicked() {
 				a.addSubscription()
 			}
@@ -772,6 +906,8 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 			{Title: "更新时间", ID: "updated", Width: 150, Align: ui.End, Sortable: true},
 		}
 		dbl := -1
+		var duplicateID string
+		var deleteIDs []string
 		tbl := ui.Table(c, &a.subList, cols, len(a.cfg.Subscriptions), func(row, col int) {
 			s := &a.cfg.Subscriptions[row]
 			cell := ui.Box(c).FillWidth().Children(func() {
@@ -800,14 +936,16 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 					a.openSubscriptionEditor(s.ID)
 				}
 				if m.Item("复制").Chosen() {
-					a.duplicateSubscription(s.ID)
+					duplicateID = s.ID
 				}
 				if m.Item("更新").Chosen() {
 					a.updateSubscriptions([]string{s.ID})
 				}
 				m.Separator()
 				if m.Item("删除").Chosen() {
-					a.deleteSubscriptions(a.subscriptionDeleteTargets(s.ID))
+					// Removing rows while the table builds them would index
+					// past the shortened list; do it after this build.
+					deleteIDs = a.subscriptionDeleteTargets(s.ID)
 				}
 			})
 			if cell.RowDoubleClicked() {
@@ -820,6 +958,14 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 			a.subListCellN++
 		}).Grow(1)
 
+		if len(deleteIDs) > 0 {
+			a.deleteSubscriptions(deleteIDs)
+			return
+		}
+		if duplicateID != "" {
+			a.duplicateSubscription(duplicateID)
+			return
+		}
 		switch {
 		case dbl >= 0:
 			a.subCursor = dbl
@@ -977,6 +1123,10 @@ func (a *app) deleteSubscriptions(ids []string) {
 	a.cfg.Subscriptions = kept
 	a.subChosen.Clear()
 	a.subCursor = -1
+	if drop[a.serverFilter] {
+		a.serverFilter = serverFilterAll
+		a.serverFilterName = "所有"
+	}
 
 	var servers []string
 	for _, s := range a.cfg.Servers {
@@ -1189,8 +1339,8 @@ func (a *app) setActive(id string) {
 // cursorServerID is the server the keyboard acts on: the cursor row, or the
 // first chosen one.
 func (a *app) cursorServerID() (string, bool) {
-	if a.cursor >= 0 && a.cursor < len(a.cfg.Servers) {
-		return a.cfg.Servers[a.cursor].ID, true
+	if a.cursor >= 0 && a.cursor < len(a.serverRows) {
+		return a.cfg.Servers[a.serverRows[a.cursor]].ID, true
 	}
 	for id := range a.chosen.All() {
 		return id, true
@@ -1272,9 +1422,7 @@ func (a *app) deleteServers(ids []string) {
 		if len(a.cfg.Servers) > 0 {
 			a.cfg.ActiveID = a.cfg.Servers[0].ID
 		} else {
-			s := defaultServerConfig()
-			a.cfg.Servers = []serverConfig{s}
-			a.cfg.ActiveID = s.ID
+			a.cfg.ActiveID = ""
 		}
 	}
 }
@@ -1486,6 +1634,12 @@ func main() {
 		return
 	}
 
+	// Let development and debugging runs use a private config file instead
+	// of the user's ~/sunray.json.
+	if path := configArg(os.Args[1:]); path != "" {
+		configFileOverride = path
+	}
+
 	// Keep the resident size in check: the core and the UI together do not
 	// need much, and a tighter heap costs a little CPU. GOMEMLIMIT and GOGC
 	// in the environment win, so the user can tune the footprint.
@@ -1499,6 +1653,7 @@ func main() {
 	// patched mygo asks for when MYGO_WARP is set. macOS draws with Metal,
 	// which has no software fallback, so the setting does nothing there.
 	a := &app{cfg: loadConfig(), cursor: -1, subCursor: -1, tests: map[string]*testState{}}
+	a.tunMTU = strconv.FormatFloat(a.cfg.Global.TunMTU, 'f', 0, 64)
 	if a.cfg.Global.SoftRender {
 		switch runtime.GOOS {
 		case "windows":

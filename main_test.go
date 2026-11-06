@@ -34,6 +34,69 @@ func TestViewServerList(t *testing.T) {
 	}
 }
 
+// The server list can be filtered by subscription, with an unclassified
+// bucket for servers that do not belong to one.
+func TestServerListFilter(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
+	a.cfg.Subscriptions = []subscriptionConfig{
+		{ID: "sub-a", Name: "机场 A"},
+		{ID: "sub-b", Name: "机场 B"},
+	}
+	a.cfg.Servers = []serverConfig{
+		{ID: "manual", Name: "手动节点", Protocol: "freedom"},
+		{ID: "a1", Name: "A 节点 1", Protocol: "freedom", SubscriptionID: "sub-a"},
+		{ID: "a2", Name: "A 节点 2", Protocol: "freedom", SubscriptionID: "sub-a"},
+		{ID: "b1", Name: "B 节点", Protocol: "freedom", SubscriptionID: "sub-b"},
+		{ID: "orphan", Name: "孤儿节点", Protocol: "freedom", SubscriptionID: "missing"},
+	}
+	a.cfg.ActiveID = "a1"
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if err := tt.Click("所有"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"所有", "未分类", "机场 A", "机场 B"} {
+		if !tt.HasText(want) {
+			t.Errorf("filter select missing %q; texts: %v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("机场 A"); err != nil {
+		t.Fatal(err)
+	}
+	if a.serverFilter != "sub-a" {
+		t.Fatalf("filter = %q, want sub-a", a.serverFilter)
+	}
+	if len(a.serverRows) != 2 || a.serverRows[0] != 1 || a.serverRows[1] != 2 {
+		t.Fatalf("filtered rows = %v, want [1 2]", a.serverRows)
+	}
+	if tt.HasText("手动节点") || tt.HasText("B 节点") || !tt.HasText("A 节点 1") {
+		t.Fatalf("visible rows after filtering: %v", tt.Texts())
+	}
+
+	if err := tt.Click("机场 A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("未分类"); err != nil {
+		t.Fatal(err)
+	}
+	if a.serverFilter != serverFilterUncategorized {
+		t.Fatalf("filter = %q, want uncategorized", a.serverFilter)
+	}
+	if len(a.serverRows) != 2 || a.serverRows[0] != 0 || a.serverRows[1] != 4 {
+		t.Fatalf("uncategorized rows = %v, want [0 4]", a.serverRows)
+	}
+
+	if err := tt.Click("未分类"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("所有"); err != nil {
+		t.Fatal(err)
+	}
+	if a.serverFilter != serverFilterAll || len(a.serverRows) != 5 {
+		t.Fatalf("all rows = %v, filter %q", a.serverRows, a.serverFilter)
+	}
+}
+
 // The subscription tab is a list with its toolbar and columns.
 func TestViewSubscriptionList(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), tab: tabSubscription, subCursor: -1}
@@ -49,7 +112,8 @@ func TestViewSubscriptionList(t *testing.T) {
 	}
 }
 
-// A row click chooses a subscription; a toolbar click clears the choice.
+// A row click chooses a subscription; a toolbar click keeps it for batch
+// actions, while a click on the blank list clears it.
 func TestSubscriptionListSelectionClears(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), tab: tabSubscription, subCursor: -1}
 	a.cfg.Subscriptions = []subscriptionConfig{{
@@ -66,8 +130,16 @@ func TestSubscriptionListSelectionClears(t *testing.T) {
 	if err := tt.Click("共 1 个"); err != nil {
 		t.Fatal(err)
 	}
-	if a.subCursor != -1 || a.subChosen.Len() != 0 {
+	if a.subCursor != 0 || a.subChosen.Len() != 1 {
 		t.Fatalf("after a toolbar click: cursor %d, chosen %d", a.subCursor, a.subChosen.Len())
+	}
+	row, ok := tt.Find("test-sub")
+	if !ok {
+		t.Fatal("the subscription row is missing")
+	}
+	tt.ClickAt(440, row.Y+120)
+	if a.subCursor != -1 || a.subChosen.Len() != 0 {
+		t.Fatalf("after a blank list click: cursor %d, chosen %d", a.subCursor, a.subChosen.Len())
 	}
 }
 
@@ -103,6 +175,7 @@ func TestSubscriptionListOps(t *testing.T) {
 	})
 	a.subChosen.Clear()
 	a.subChosen.Add(added)
+	a.serverFilter = added
 	a.deleteSelectedSubscriptions()
 	if len(a.cfg.Subscriptions) != 1 {
 		t.Fatalf("after deleting one: got %d subscriptions, want 1", len(a.cfg.Subscriptions))
@@ -110,10 +183,13 @@ func TestSubscriptionListOps(t *testing.T) {
 	if _, ok := a.serverByID("imported"); ok {
 		t.Fatal("the imported server should be removed with its subscription")
 	}
+	if a.serverFilter != serverFilterAll {
+		t.Fatalf("deleting the filtered subscription left filter %q", a.serverFilter)
+	}
 }
 
-// A row click chooses a server; a click on the blank part of the list, a
-// toolbar label or another tab clears the choice.
+// A row click chooses a server; a toolbar click keeps it for batch actions,
+// while a click on the blank part of the list or another tab clears it.
 func TestServerListSelectionClears(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
 	a.cfg.Servers[0].Name = "test-server"
@@ -137,18 +213,18 @@ func TestServerListSelectionClears(t *testing.T) {
 	}
 
 	choose()
+	if err := tt.Click("共 1 个"); err != nil {
+		t.Fatal(err)
+	}
+	if a.cursor != 0 || a.chosen.Len() != 1 {
+		t.Fatalf("after a toolbar click: cursor %d, chosen %d", a.cursor, a.chosen.Len())
+	}
 	row, ok := tt.Find("test-server")
 	if !ok {
 		t.Fatal("the server row is missing")
 	}
 	tt.ClickAt(440, row.Y+120) // below the only row
 	cleared("a blank list click")
-
-	choose()
-	if err := tt.Click("共 1 个"); err != nil {
-		t.Fatal(err)
-	}
-	cleared("a toolbar click")
 
 	choose()
 	if err := tt.Click("全局"); err != nil {
@@ -158,6 +234,75 @@ func TestServerListSelectionClears(t *testing.T) {
 		t.Fatalf("after clicking the global tab: tab %d", a.tab)
 	}
 	cleared("a tab click")
+}
+
+// Batch delete acts on the rows chosen with Shift, and a right-click delete
+// removes the chosen rows after the table has finished building.
+func TestServerListBatchDelete(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
+	a.cfg.Servers = []serverConfig{
+		{ID: "s1", Name: "S1", Protocol: "freedom"},
+		{ID: "s2", Name: "S2", Protocol: "freedom"},
+		{ID: "s3", Name: "S3", Protocol: "freedom"},
+		{ID: "keep", Name: "Keep", Protocol: "freedom"},
+	}
+	a.cfg.ActiveID = "keep"
+	a.saver.remember(a.cfg)
+
+	for _, rightClick := range []bool{false, true} {
+		a.cfg.Servers = []serverConfig{
+			{ID: "s1", Name: "S1", Protocol: "freedom"},
+			{ID: "s2", Name: "S2", Protocol: "freedom"},
+			{ID: "s3", Name: "S3", Protocol: "freedom"},
+			{ID: "keep", Name: "Keep", Protocol: "freedom"},
+		}
+		a.cfg.ActiveID = "keep"
+		a.chosen.Clear()
+		a.cursor = -1
+		a.saver.remember(a.cfg)
+		tt := ui.NewTester(a.view, 880, 620)
+		if err := tt.Click("S1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := tt.ClickWith(ui.Shift, "S3"); err != nil {
+			t.Fatal(err)
+		}
+		if rightClick {
+			if err := tt.RightClick("S2"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.ChooseMenuItem("删除"); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := tt.Click("删除"); err != nil {
+			t.Fatal(err)
+		}
+		if len(a.cfg.Servers) != 1 || a.cfg.Servers[0].ID != "keep" {
+			t.Fatalf("right click %v: after delete: %+v", rightClick, a.cfg.Servers)
+		}
+	}
+}
+
+// Deleting the only server must leave an empty list, not silently create a
+// replacement that looks like the delete failed.
+func TestServerListDeleteLast(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), tab: tabServer, cursor: -1}
+	a.cfg.Servers = []serverConfig{{ID: "only", Name: "Only", Protocol: "freedom"}}
+	a.cfg.ActiveID = "only"
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if err := tt.Click("Only"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("删除"); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.cfg.Servers) != 0 || a.cfg.ActiveID != "" {
+		t.Fatalf("after deleting the last server: %+v, active %q", a.cfg.Servers, a.cfg.ActiveID)
+	}
+	if !tt.HasText("共 0 个") {
+		t.Fatalf("list should show an empty count; texts: %v", tt.Texts())
+	}
 }
 
 // The protocol form reused by the editor windows renders its fields.
@@ -252,6 +397,26 @@ func TestBuildJSONAllProtocols(t *testing.T) {
 	}
 }
 
+// VMess alterId is part of the link and must reach the generated user.
+func TestBuildJSONVMessAlterID(t *testing.T) {
+	g := defaultGlobalConfig()
+	c := defaultServerConfig()
+	c.Protocol = "vmess"
+	c.Address, c.Port, c.Secret = "vmess.example.com", "443", "uuid-vmess"
+	c.VMessAlterID = "2"
+	data, err := c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"alterId": 2`) {
+		t.Errorf("config missing alterId 2; got %s", data)
+	}
+	c.VMessAlterID = "bad"
+	if _, err := c.buildJSON(&g); err == nil {
+		t.Error("want error for invalid alterId")
+	}
+}
+
 // allowInsecure must reach tlsSettings, otherwise the core cannot skip
 // verification of self-signed / chain-incomplete servers (e.g. hysteria2).
 func TestBuildJSONAllowInsecure(t *testing.T) {
@@ -291,6 +456,24 @@ func TestBuildJSONErrors(t *testing.T) {
 	}
 }
 
+// The test button acts on the chosen servers, and on all only when none
+// are chosen.
+func TestServerTestTargets(t *testing.T) {
+	a := &app{cfg: defaultAppConfig()}
+	a.cfg.Servers = []serverConfig{
+		{ID: "s1", Name: "S1"},
+		{ID: "s2", Name: "S2"},
+	}
+	a.chosen.Add("s2")
+	if got := a.testTargets(); len(got) != 1 || got[0] != "s2" {
+		t.Fatalf("selected targets = %v, want [s2]", got)
+	}
+	a.chosen.Clear()
+	if got := a.testTargets(); len(got) != 2 {
+		t.Fatalf("all targets = %v, want both servers", got)
+	}
+}
+
 // The list supports add, activate, batch duplicate and batch delete.
 func TestServerListOps(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), cursor: -1}
@@ -318,11 +501,11 @@ func TestServerListOps(t *testing.T) {
 		a.chosen.Add(s.ID)
 	}
 	a.deleteSelected()
-	if len(a.cfg.Servers) != 1 {
-		t.Fatalf("after deleting all: got %d servers, want 1 fallback", len(a.cfg.Servers))
+	if len(a.cfg.Servers) != 0 {
+		t.Fatalf("after deleting all: got %d servers, want 0", len(a.cfg.Servers))
 	}
-	if a.cfg.ActiveID != a.cfg.Servers[0].ID {
-		t.Error("active server should fall back to the remaining one")
+	if a.cfg.ActiveID != "" {
+		t.Errorf("active server = %q, want empty", a.cfg.ActiveID)
 	}
 }
 
