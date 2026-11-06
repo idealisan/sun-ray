@@ -371,14 +371,44 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// guiHandler turns xray log messages into lines for the UI.
-type guiHandler struct{ fn func(string) }
+// guiHandler turns xray log messages into lines for the UI. Severity values
+// grow with verbosity (Debug=4 is the most verbose), so a message is dropped
+// when it is more verbose than the configured level.
+type guiHandler struct {
+	fn    func(string)
+	level log.Severity
+}
 
 func (h *guiHandler) Handle(msg log.Message) {
-	if gm, ok := msg.(*log.GeneralMessage); ok && gm.Severity < log.Severity_Info {
-		return // drop debug spam, keep info and above
+	if gm, ok := msg.(*log.GeneralMessage); ok && gm.Severity > h.level {
+		return
 	}
 	h.fn(msg.String())
+}
+
+func severityForLogLevel(level string) log.Severity {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return log.Severity_Debug
+	case "info":
+		return log.Severity_Info
+	case "warning", "warn":
+		return log.Severity_Warning
+	case "error":
+		return log.Severity_Error
+	default:
+		return log.Severity_Warning
+	}
+}
+
+func guiHandlerForConfig(cfgJSON []byte, fn func(string)) *guiHandler {
+	var cfg struct {
+		Log struct {
+			LogLevel string `json:"loglevel"`
+		} `json:"log"`
+	}
+	_ = json.Unmarshal(cfgJSON, &cfg)
+	return &guiHandler{fn: fn, level: severityForLogLevel(cfg.Log.LogLevel)}
 }
 
 // xrayCore owns the in-process Instance.
@@ -426,7 +456,7 @@ func (x *xrayCore) Start(cfgJSON []byte, onLog func(string)) (err error) {
 
 	// xray registers its own log handler during Start; ours goes in after
 	// it, so log lines land in the GUI.
-	log.RegisterHandler(&guiHandler{fn: onLog})
+	log.RegisterHandler(guiHandlerForConfig(cfgJSON, onLog))
 	return nil
 }
 

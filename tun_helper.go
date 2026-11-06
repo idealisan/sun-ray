@@ -199,10 +199,10 @@ func runTunHelper(args []string) (err error) {
 	}
 	defer inst.Close()
 
-	xlog.RegisterHandler(&guiHandler{fn: func(line string) {
+	xlog.RegisterHandler(guiHandlerForConfig(wrapper.Xray, func(line string) {
 		line = strings.ReplaceAll(strings.TrimRight(line, "\n"), "\n", " ")
 		_ = send.send("LOG %s", line)
-	}})
+	}))
 	if err := send.send("READY"); err != nil {
 		return err
 	}

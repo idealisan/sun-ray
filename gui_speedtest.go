@@ -117,7 +117,7 @@ func (a *app) measureServer(s serverConfig) (time.Duration, float64, error) {
 	}
 	defer inst.Close()
 	// The temporary core took over the log handler; give it back to the GUI.
-	log.RegisterHandler(&guiHandler{fn: a.addLog})
+	log.RegisterHandler(&guiHandler{fn: a.addLog, level: severityForLogLevel(a.cfg.Global.LogLevel)})
 
 	socksAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	latency, err := measureLatency(socksAddr)

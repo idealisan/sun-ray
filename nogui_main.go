@@ -88,7 +88,7 @@ func main() {
 	defer inst.Close()
 
 	// The core logs to the handler, which prints to the standard output.
-	xlog.RegisterHandler(&guiHandler{fn: printLine})
+	xlog.RegisterHandler(guiHandlerForConfig(data, printLine))
 	if *testMode {
 		host := "127.0.0.1"
 		if cfg.Global.AllowLAN {

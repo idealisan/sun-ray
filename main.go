@@ -28,8 +28,12 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// maxLogChars bounds the run log. The log is a debugging aid, so keeping the
-// newest 500K characters is plenty and avoids growing without limit.
+// maxLogLines bounds the run log by line count: the log is a debugging aid,
+// so the newest 200 lines are enough and scrolling stays cheap.
+const maxLogLines = 200
+
+// maxLogChars bounds the run log by character count, mostly to guard against
+// one extremely long line growing the buffer without limit.
 const maxLogChars = 500_000
 
 // restartDelay is how long the app waits for the settings to settle before
@@ -267,8 +271,9 @@ func (a *app) addLog(line string) {
 	})
 }
 
-// appendLogLine appends line and drops the oldest lines until the joined log
-// fits within limit characters. It returns the new log and its character count.
+// appendLogLine appends line and drops the oldest lines until the log fits
+// within maxLogLines lines and limit characters. It returns the new log and
+// its character count.
 func appendLogLine(logs []string, chars int, line string, limit int) ([]string, int) {
 	if len(logs) > 0 {
 		chars++ // newline between the previous line and this one
@@ -279,6 +284,11 @@ func appendLogLine(logs []string, chars int, line string, limit int) ([]string, 
 	for chars > limit && len(logs) > 1 {
 		chars -= utf8.RuneCountInString(logs[0]) + 1
 		logs[0] = "" // release the dropped line for the garbage collector
+		logs = logs[1:]
+	}
+	for len(logs) > maxLogLines {
+		chars -= utf8.RuneCountInString(logs[0]) + 1
+		logs[0] = ""
 		logs = logs[1:]
 	}
 	if chars > limit {
