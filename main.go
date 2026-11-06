@@ -777,7 +777,7 @@ func (a *app) serverListTab(c *ui.Context) {
 				}
 				m.Separator()
 				if m.Item("测试").Chosen() {
-					a.runTestsFor([]string{s.ID})
+					a.runTestsFor(a.testTargetsFor(s.ID))
 				}
 				if m.Item("删除").Chosen() {
 					// Removing rows while the table builds them would index

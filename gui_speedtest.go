@@ -24,17 +24,37 @@ func (a *app) runTests() {
 	a.runTestsFor(a.testTargets())
 }
 
-// testTargets is the selection the test button acts on, or every server
-// when nothing is selected.
+// testTargets is the selection the test button acts on, narrowed to the rows
+// the current filter shows: rows scrolled out of the viewport still count,
+// rows the filter hides do not. When nothing is chosen, the whole filtered
+// list is tested.
 func (a *app) testTargets() []string {
-	ids := a.selectedIDs()
-	if len(ids) == 0 {
-		ids = make([]string, 0, len(a.cfg.Servers))
-		for i := range a.cfg.Servers {
-			ids = append(ids, a.cfg.Servers[i].ID)
+	if a.chosen.Len() > 0 {
+		ids := make([]string, 0, a.chosen.Len())
+		for _, row := range a.serverRows {
+			if id := a.cfg.Servers[row].ID; a.chosen.Has(id) {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			return ids
 		}
 	}
+	ids := make([]string, 0, len(a.serverRows))
+	for _, row := range a.serverRows {
+		ids = append(ids, a.cfg.Servers[row].ID)
+	}
 	return ids
+}
+
+// testTargetsFor is what the context menu of the row id acts on: the whole
+// selection when the row is part of it, otherwise just that row. It mirrors
+// deleteTargets.
+func (a *app) testTargetsFor(id string) []string {
+	if a.chosen.Has(id) {
+		return a.testTargets()
+	}
+	return []string{id}
 }
 
 // runTestsFor measures the given servers, one after another, so they do

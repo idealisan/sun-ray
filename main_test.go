@@ -456,21 +456,36 @@ func TestBuildJSONErrors(t *testing.T) {
 	}
 }
 
-// The test button acts on the chosen servers, and on all only when none
-// are chosen.
+// The test button acts on the chosen servers within the filtered list, and on
+// the whole filtered list when none are chosen. A context menu on a chosen
+// row acts on the whole selection; on an unchosen row, on that row alone.
 func TestServerTestTargets(t *testing.T) {
 	a := &app{cfg: defaultAppConfig()}
 	a.cfg.Servers = []serverConfig{
 		{ID: "s1", Name: "S1"},
 		{ID: "s2", Name: "S2"},
+		{ID: "s3", Name: "S3"},
 	}
+	// The filter shows s1 and s2; s3 is hidden and must never be tested.
+	a.serverRows = []int{0, 1}
+
 	a.chosen.Add("s2")
 	if got := a.testTargets(); len(got) != 1 || got[0] != "s2" {
 		t.Fatalf("selected targets = %v, want [s2]", got)
 	}
+	a.chosen.Add("s1")
+	if got := a.testTargets(); len(got) != 2 || got[0] != "s1" || got[1] != "s2" {
+		t.Fatalf("multi targets = %v, want [s1 s2] in list order", got)
+	}
+	if got := a.testTargetsFor("s2"); len(got) != 2 {
+		t.Fatalf("context menu on a chosen row = %v, want the selection", got)
+	}
+	if got := a.testTargetsFor("s3"); len(got) != 1 || got[0] != "s3" {
+		t.Fatalf("context menu on an unchosen row = %v, want [s3]", got)
+	}
 	a.chosen.Clear()
 	if got := a.testTargets(); len(got) != 2 {
-		t.Fatalf("all targets = %v, want both servers", got)
+		t.Fatalf("all targets = %v, want the filtered list only", got)
 	}
 }
 
