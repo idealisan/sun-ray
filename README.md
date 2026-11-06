@@ -64,6 +64,9 @@ go build -ldflags "-H windowsgui" -o sun-ray.exe .
 # 运行测试（headless 渲染，无需窗口）
 go test ./...
 
+# 开发/调试时用独立的配置文件，避免覆盖 ~/sunray.json
+go run . -config /tmp/sunray-dev.json
+
 # 按协议端到端测试：本地启动上游，curl 通过混合入站访问本地 origin
 go test -tags integration -count=1 -v -timeout 10m ./integration
 ```

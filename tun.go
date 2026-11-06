@@ -20,6 +20,16 @@ const (
 	defaultTunGateway = "172.19.0.1/30"
 )
 
+// parseTunMTU accepts the text field's value. Out-of-range or malformed
+// input is ignored, leaving the previous value in place.
+func parseTunMTU(raw string) (float64, bool) {
+	mtu, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || mtu < 576 || mtu > 9000 {
+		return 0, false
+	}
+	return float64(mtu), true
+}
+
 // tunInbound renders the TUN inbound for the given settings. The
 // routes send the traffic into the interface, and xray keeps its own
 // connections out of it, so the proxy does not loop into itself.

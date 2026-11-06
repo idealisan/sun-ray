@@ -9,13 +9,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 const saveDebounce = 2 * time.Second
 
-// configPath returns <home>/sunray.json.
+// configFileOverride is set by -config at startup. Keeping it separate from
+// the default path lets development runs use their own file and leaves the
+// user's ~/sunray.json untouched.
+var configFileOverride string
+
+// configPath returns the -config path when given, otherwise <home>/sunray.json.
 func configPath() string {
+	if configFileOverride != "" {
+		return configFileOverride
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "sunray.json" // fall back to the working directory
@@ -48,7 +57,9 @@ func loadConfigFile(path string) (appConfig, error) {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return appConfig{}, err
 	}
-	if len(saved.Servers) == 0 {
+	// A missing "servers" key means the file is incomplete; an explicit
+	// empty list is valid, so the user can delete every server.
+	if saved.Servers == nil {
 		return appConfig{}, fmt.Errorf("%s: config has no servers", path)
 	}
 	for i := range saved.Servers {
@@ -66,6 +77,9 @@ func loadConfigFile(path string) (appConfig, error) {
 	}
 	if saved.Results == nil {
 		saved.Results = map[string]serverResult{}
+	}
+	if saved.Global.TunMTU <= 0 {
+		saved.Global.TunMTU = defaultTunMTU
 	}
 	return saved, nil
 }
@@ -116,4 +130,25 @@ func (s *configSaver) maybeSave(cfg appConfig, force bool) {
 	}
 	s.lastJSON = string(data)
 	s.lastSave = time.Now()
+}
+
+// configArg returns the path after -config/--config (or -config=path).
+// Unknown arguments are ignored so the macOS launcher's -psn_* argument and
+// other framework flags do not stop parsing.
+func configArg(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-config" || arg == "--config":
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		case strings.HasPrefix(arg, "-config="):
+			return strings.TrimPrefix(arg, "-config=")
+		case strings.HasPrefix(arg, "--config="):
+			return strings.TrimPrefix(arg, "--config=")
+		}
+	}
+	return ""
 }

@@ -10,6 +10,34 @@ import (
 
 // The TUN inbound must appear in the config only when it is turned on,
 // with the settings the user gave.
+func TestDefaultTunMTU(t *testing.T) {
+	if got := defaultGlobalConfig().TunMTU; got != defaultTunMTU {
+		t.Fatalf("default TUN MTU = %v, want %d", got, defaultTunMTU)
+	}
+}
+
+func TestParseTunMTU(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want float64
+		ok   bool
+	}{
+		{"1500", 1500, true},
+		{" 1420 ", 1420, true},
+		{"576", 576, true},
+		{"9000", 9000, true},
+		{"575", 0, false},
+		{"9001", 0, false},
+		{"", 0, false},
+		{"abc", 0, false},
+	} {
+		got, ok := parseTunMTU(tc.raw)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("parseTunMTU(%q) = %v,%v, want %v,%v", tc.raw, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestTunInbound(t *testing.T) {
 	c := defaultServerConfig()
 	c.Protocol = "freedom"
