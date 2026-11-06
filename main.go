@@ -384,6 +384,9 @@ func (a *app) startLocked() {
 		a.addLog("[sun-ray] 启动失败: " + err.Error())
 		return
 	}
+	// A stop takes the system proxy back out; put it back now that the
+	// local port is listening again.
+	a.syncSystemProxy(&g)
 	a.addLog("[sun-ray] 内核已在本进程内启动")
 	a.updateTrayIcon()
 }
@@ -392,6 +395,12 @@ func (a *app) stop() {
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
 	a.stopLocked()
+	// The local port is closed, so the system proxy would point at a dead
+	// port: clear what the app set, PAC included. Starting applies it
+	// again. The configured mode is left alone.
+	if a.cfg.Global.ProxyMode != proxyModeOff {
+		a.clearSystemProxySetting()
+	}
 }
 
 func (a *app) stopLocked() {
@@ -566,7 +575,7 @@ func (a *app) pointerOverToolbar(c *ui.Context, x, y float32) bool {
 func (a *app) globalTab(c *ui.Context) {
 	g := &a.cfg.Global
 	t := c.Theme()
-	ui.Row(c).Fill().Gap(24).AlignItems(ui.Stretch).Children(func() {
+	ui.Row(c).Grow(1).Gap(24).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 			ui.Text(c, "入站（本机代理）").Bold()
 			ui.Field(c, "监听端口（SOCKS 与 HTTP 共用）", func() {
@@ -687,7 +696,7 @@ func (a *app) serverListTab(c *ui.Context) {
 	a.list.Selected = &a.cursor
 	a.list.Sort = &a.sort
 
-	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
+	ui.Column(c).Grow(1).Padding(0, 4, 8).Gap(8).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Bind(&a.serverToolbar).Children(func() {
 			if ui.Button(c.Key("srvadd"), "新增").Clicked() {
 				a.addServer()
@@ -910,7 +919,7 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 	a.subList.Selected = &a.subCursor
 	a.subList.Sort = &a.subSort
 
-	ui.Column(c).Fill().Padding(0, 4, 8).Gap(8).Children(func() {
+	ui.Column(c).Grow(1).Padding(0, 4, 8).Gap(8).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Bind(&a.subToolbar).Children(func() {
 			if ui.Button(c.Key("subadd"), "新增").Clicked() {
 				a.addSubscription()
@@ -1511,7 +1520,7 @@ func (a *app) applySort() {
 // (drag, double-click, Ctrl+C) and a button copies everything at once.
 func (a *app) logTab(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Fill().Padding(0, 4, 8).Gap(6).Children(func() {
+	ui.Column(c).Grow(1).Padding(0, 4, 8).Gap(6).Children(func() {
 		ui.Row(c).Children(func() {
 			ui.Text(c, "选中文本后 Ctrl+C 复制，或").TextColor(t.TextMuted).Grow(1)
 			if ui.Button(c.Key("copylog"), "复制全部日志").Clicked() {
