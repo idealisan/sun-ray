@@ -33,11 +33,29 @@ func launchTunHelper(exe, configPath, errorPath string) error {
 	}
 	defer os.RemoveAll(dir)
 	scriptPath := filepath.Join(dir, "run.sh")
-	script := "#!/bin/sh\nnohup " +
-		shellQuote(exe) + " " + tunHelperArg +
-		" -config " + shellQuote(configPath) +
-		" -errorfile " + shellQuote(errorPath) +
-		" >/dev/null 2>&1 &\n"
+	var script string
+	switch runtime.GOOS {
+	case "darwin":
+		// Do not start the helper as a child of "do shell script": macOS
+		// may wait for or kill background descendants when that command
+		// exits. launchd owns the process instead, so it survives and can
+		// connect back to our control listener.
+		script = "#!/bin/sh\n" +
+			"/bin/launchctl remove " + tunHelperJobLabel + " >/dev/null 2>&1 || true\n" +
+			"exec /bin/launchctl submit -l " + tunHelperJobLabel +
+			" -o /dev/null -e " + shellQuote(errorPath) +
+			" -- " + shellQuote(exe) + " " + tunHelperArg +
+			" -config " + shellQuote(configPath) +
+			" -errorfile " + shellQuote(errorPath) + "\n"
+	case "linux":
+		script = "#!/bin/sh\nnohup " +
+			shellQuote(exe) + " " + tunHelperArg +
+			" -config " + shellQuote(configPath) +
+			" -errorfile " + shellQuote(errorPath) +
+			" >/dev/null 2>&1 &\n"
+	default:
+		return errors.New("TUN 辅助进程在 " + runtime.GOOS + " 上还不支持")
+	}
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
 		return err
 	}

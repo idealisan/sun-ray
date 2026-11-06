@@ -29,7 +29,10 @@ import (
 	xlog "github.com/xtls/xray-core/common/log"
 )
 
-const tunHelperArg = "-tun-helper"
+const (
+	tunHelperArg      = "-tun-helper"
+	tunHelperJobLabel = "com.sunray.tunhelper"
+)
 
 // errElevationCancelled means the user dismissed the administrator prompt.
 var errElevationCancelled = errors.New("elevation cancelled")
@@ -119,7 +122,21 @@ func runTunHelperIfRequested() bool {
 	return true
 }
 
+// removeTunHelperJob removes the launchd job that launched this helper.
+// Without it the submitted job stays in the system domain after the helper
+// exits, and launchd keeps respawning it with a config file that is gone.
+func removeTunHelperJob() {
+	if runtime.GOOS != "darwin" || !helperElevated() {
+		return
+	}
+	if os.Getenv("XPC_SERVICE_NAME") != tunHelperJobLabel {
+		return
+	}
+	_ = exec.Command("/bin/launchctl", "remove", tunHelperJobLabel).Run()
+}
+
 func runTunHelper(args []string) (err error) {
+	defer removeTunHelperJob()
 	fs := flag.NewFlagSet("tun-helper", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "the wrapper config")

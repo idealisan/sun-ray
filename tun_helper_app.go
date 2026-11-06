@@ -73,7 +73,7 @@ func startTunHelper(g *globalConfig, iface string, logf func(string)) (*tunHelpe
 	}
 
 	if tcp, ok := listener.(*net.TCPListener); ok {
-		_ = tcp.SetDeadline(time.Now().Add(30 * time.Second))
+		_ = tcp.SetDeadline(time.Now().Add(15 * time.Second))
 	}
 	conn, err := listener.Accept()
 	if err != nil {
@@ -98,7 +98,7 @@ func startTunHelper(g *globalConfig, iface string, logf func(string)) (*tunHelpe
 		settings: tunSettingsFor(g, iface, tunName),
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
