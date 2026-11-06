@@ -116,15 +116,24 @@ var protocolRegistry = map[string]protocolSpec{
 		name: "vmess", needsAddr: true, needsSecret: true, secretLabel: "UUID", stream: true,
 		fields: []fieldSpec{
 			selectField("加密方式", func(c *serverConfig) *string { return &c.VMessSecurity }, vmessSecurities),
+			textField("AlterId", "0", func(c *serverConfig) *string { return &c.VMessAlterID }),
 		},
 		build: func(c *serverConfig, port int) (map[string]any, error) {
 			sec := c.VMessSecurity
 			if sec == "" {
 				sec = "auto"
 			}
+			alterID := 0
+			if c.VMessAlterID != "" {
+				n, err := strconv.Atoi(c.VMessAlterID)
+				if err != nil || n < 0 {
+					return nil, fmt.Errorf("AlterId 无效: %q", c.VMessAlterID)
+				}
+				alterID = n
+			}
 			return map[string]any{"vnext": []any{map[string]any{
 				"address": c.Address, "port": port,
-				"users": []any{map[string]any{"id": c.Secret, "security": sec, "alterId": 0, "level": 8}},
+				"users": []any{map[string]any{"id": c.Secret, "security": sec, "alterId": alterID, "level": 8}},
 			}}}, nil
 		},
 	},

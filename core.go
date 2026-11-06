@@ -39,7 +39,7 @@ type globalConfig struct {
 	RouteAds   bool    `json:"routeAds"`   // block ad domains
 	TunEnabled bool    `json:"tunEnabled"` // the TUN interface takes all the traffic
 	TunName    string  `json:"tunName"`    // the interface name, empty lets xray pick one
-	TunMTU     float64 `json:"tunMtu"`     // the interface MTU
+	TunMTU     float64 `json:"tunMtu"`     // the interface MTU, default 1500
 	TunGateway string  `json:"tunGateway"` // the interface address
 	TunIPv6    bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
 
@@ -68,6 +68,7 @@ type serverConfig struct {
 
 	VlessEncrypt          string `json:"vlessEncrypt"`          // vless encryption, default none
 	VMessSecurity         string `json:"vmessSecurity"`         // vmess user security, default auto
+	VMessAlterID          string `json:"vmessAlterId"`          // vmess user alterId, default 0
 	FreedomDomainStrategy string `json:"freedomDomainStrategy"` // freedom domainStrategy
 	InboundTag            string `json:"inboundTag"`            // loopback inboundTag
 	WGPreSharedKey        string `json:"wgPreSharedKey"`
@@ -120,14 +121,17 @@ type serverResult struct {
 }
 
 func defaultGlobalConfig() globalConfig {
-	return globalConfig{ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true}
+	return globalConfig{
+		ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true,
+		TunMTU: defaultTunMTU,
+	}
 }
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
 		ID: newServerID(), Protocol: "vless", Port: "443", Method: "aes-256-gcm",
-		VMessSecurity: "auto",
-		Network:       "tcp", Security: "none", Fingerprint: "chrome", SpiderX: "/",
+		VMessSecurity: "auto", VMessAlterID: "0",
+		Network: "tcp", Security: "none", Fingerprint: "chrome", SpiderX: "/",
 	}
 }
 

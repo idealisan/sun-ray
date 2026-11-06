@@ -14,7 +14,7 @@ import (
 func TestParseSubscriptionBody(t *testing.T) {
 	vmess, err := json.Marshal(map[string]any{
 		"v": "2", "ps": "VMess Node", "add": "vmess.example.com", "port": "8443",
-		"id": "uuid-vmess", "aid": "0", "scy": "auto", "net": "grpc",
+		"id": "uuid-vmess", "aid": "2", "scy": "auto", "net": "grpc",
 		"path": "svc", "tls": "tls", "sni": "vmess.example.com", "fp": "firefox",
 		"alpn": "h2",
 	})
@@ -50,7 +50,7 @@ func TestParseSubscriptionBody(t *testing.T) {
 	vm := nodes[1]
 	if vm.Protocol != "vmess" || vm.Name != "VMess Node" || vm.Address != "vmess.example.com" ||
 		vm.Port != "8443" || vm.Secret != "uuid-vmess" || vm.Network != "grpc" ||
-		vm.Service != "svc" || vm.Security != "tls" || vm.SNI != "vmess.example.com" ||
+		vm.VMessAlterID != "2" || vm.Service != "svc" || vm.Security != "tls" || vm.SNI != "vmess.example.com" ||
 		vm.Fingerprint != "firefox" || vm.ALPN != "h2" {
 		t.Errorf("vmess parsed as %+v", vm)
 	}
@@ -71,6 +71,28 @@ func TestParseSubscriptionBody(t *testing.T) {
 	if hy.Protocol != "hysteria" || hy.Name != "HY2 Node" || hy.Secret != "hy2pass" ||
 		hy.Security != "tls" || hy.SNI != "hy.example.com" || !hy.AllowInsecure {
 		t.Errorf("hysteria2 parsed as %+v", hy)
+	}
+}
+
+// VMess links written with net=none mean plain TCP, and their aid must be
+// kept so the generated config matches the server.
+func TestParseVMessNoneNetworkAndAlterID(t *testing.T) {
+	vmess, err := json.Marshal(map[string]any{
+		"v": "2", "ps": "VMess None", "add": "vmess.example.com", "port": 443,
+		"id": "uuid-vmess", "aid": 2, "net": "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := parseSubscriptionBody([]byte("vmess://" + base64.StdEncoding.EncodeToString(vmess)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("got %d nodes, want 1", len(nodes))
+	}
+	if nodes[0].Network != "tcp" || nodes[0].VMessAlterID != "2" {
+		t.Fatalf("got network=%q alterId=%q, want tcp and 2", nodes[0].Network, nodes[0].VMessAlterID)
 	}
 }
 

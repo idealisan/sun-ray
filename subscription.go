@@ -136,7 +136,7 @@ func nodeKey(s serverConfig) string {
 	return strings.Join([]string{
 		s.Protocol, s.Address, s.Port, s.Secret, s.Method,
 		s.Network, s.Path, s.Host, s.Service,
-		s.Security, s.SNI, s.PublicKey, s.ShortID, s.Flow, s.VMessSecurity,
+		s.Security, s.SNI, s.PublicKey, s.ShortID, s.Flow, s.VMessSecurity, s.VMessAlterID,
 	}, "\x00")
 }
 
@@ -327,6 +327,7 @@ func parseVMess(raw string) (serverConfig, error) {
 		return serverConfig{}, errors.New("VMess 缺少 UUID")
 	}
 	s.VMessSecurity = firstNonEmpty(jsonString(m, "scy"), "auto")
+	s.VMessAlterID = firstNonEmpty(jsonString(m, "aid"), "0")
 	if s.Network, err = subscriptionNetwork(jsonString(m, "net")); err != nil {
 		return serverConfig{}, err
 	}
@@ -538,7 +539,7 @@ func subscriptionPort(raw, fallback string) (string, error) {
 
 func subscriptionNetwork(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "tcp", "raw":
+	case "", "tcp", "raw", "none":
 		return "tcp", nil
 	case "ws", "websocket":
 		return "ws", nil
