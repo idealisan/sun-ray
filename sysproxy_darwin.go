@@ -24,7 +24,8 @@ func applySystemProxyPlatform(action, addr, pacURL string) error {
 		case proxyModeManual:
 			runQuiet("networksetup", "-setwebproxy", service, host, port)
 			runQuiet("networksetup", "-setsecureproxy", service, host, port)
-			runQuiet("networksetup", "-setproxybypassdomains", service, "localhost", "127.0.0.1", "*.local")
+			bypass := append([]string{"-setproxybypassdomains", service}, macProxyBypass()...)
+			runQuiet("networksetup", bypass...)
 		case proxyModePAC:
 			runQuiet("networksetup", "-setautoproxyurl", service, pacURL)
 			runQuiet("networksetup", "-setautoproxystate", service, "on")

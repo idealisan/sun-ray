@@ -27,6 +27,9 @@ func TestLoadConfigFile(t *testing.T) {
 	if cfg.Global.TunMTU != defaultTunMTU {
 		t.Fatalf("zero TUN MTU should load as %d, got %v", defaultTunMTU, cfg.Global.TunMTU)
 	}
+	if cfg.Global.DNSPreset != dnsPresetSystem {
+		t.Fatalf("empty DNS preset should load as %q, got %q", dnsPresetSystem, cfg.Global.DNSPreset)
+	}
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0].ID == "" {
 		t.Fatalf("subscription should load with an id: %+v", cfg.Subscriptions)
 	}

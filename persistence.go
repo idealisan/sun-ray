@@ -81,6 +81,9 @@ func loadConfigFile(path string) (appConfig, error) {
 	if saved.Global.TunMTU <= 0 {
 		saved.Global.TunMTU = defaultTunMTU
 	}
+	if saved.Global.DNSPreset == "" {
+		saved.Global.DNSPreset = dnsPresetSystem
+	}
 	return saved, nil
 }
 

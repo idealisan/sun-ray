@@ -621,6 +621,14 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Text(c, "路由预设").Bold()
 			ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
 			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
+
+			ui.Text(c, "DNS").Bold()
+			renderChoiceLabels(c, "DNS 服务器", &g.DNSPreset, dnsPresetValues, dnsPresetLabels)
+			if g.DNSPreset == dnsPresetCustom {
+				ui.Field(c, "自定义 DNS（逗号或空格分隔，支持 IP 与 DoH URL）", func() {
+					ui.TextInput(c, &g.DNSCustom).Placeholder("223.5.5.5, https://dns.alidns.com/dns-query")
+				})
+			}
 			a.updateTrayTip()
 		})
 	})
@@ -1521,6 +1529,38 @@ func renderChoice(c *ui.Context, label string, selected *string, options []strin
 			return
 		}
 		ui.Select(c, selected, options)
+	})
+}
+
+// renderChoiceLabels is renderChoice with a stable value and a separate
+// display label for each option.
+func renderChoiceLabels(c *ui.Context, label string, selected *string, values, labels []string) {
+	if *selected == "" && len(values) > 0 {
+		*selected = values[0]
+	}
+	ui.Field(c, label, func() {
+		if len(values) <= 4 {
+			ui.RadioGroup(c, func() {
+				for i, value := range values {
+					ui.Radio(c, selected, value, labels[i])
+				}
+			}).Row().Gap(14).Wrap()
+			return
+		}
+		display := labels[0]
+		for i, value := range values {
+			if value == *selected {
+				display = labels[i]
+				break
+			}
+		}
+		ui.Select(c, &display, labels)
+		for i, text := range labels {
+			if text == display {
+				*selected = values[i]
+				break
+			}
+		}
 	})
 }
 

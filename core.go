@@ -37,6 +37,8 @@ type globalConfig struct {
 	SoftRender bool    `json:"softRender"` // draw with the software rasterizer, which uses less memory
 	RouteCN    bool    `json:"routeCN"`    // direct traffic to mainland China sites/IPs
 	RouteAds   bool    `json:"routeAds"`   // block ad domains
+	DNSPreset  string  `json:"dnsPreset"`  // system, ali, ali-doh, cf, cf-doh or custom
+	DNSCustom  string  `json:"dnsCustom"`  // comma/space separated servers for custom
 	TunEnabled bool    `json:"tunEnabled"` // the TUN interface takes all the traffic
 	TunName    string  `json:"tunName"`    // the interface name, empty lets xray pick one
 	TunMTU     float64 `json:"tunMtu"`     // the interface MTU, default 1500
@@ -123,7 +125,7 @@ type serverResult struct {
 func defaultGlobalConfig() globalConfig {
 	return globalConfig{
 		ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true,
-		TunMTU: defaultTunMTU,
+		DNSPreset: dnsPresetSystem, TunMTU: defaultTunMTU,
 	}
 }
 
@@ -203,6 +205,35 @@ func (s *subscriptionConfig) displayName() string {
 	return "未命名订阅"
 }
 
+// privateSpecialCIDRs covers the IANA special-purpose address registries,
+// so local, link-local, CGNAT, benchmarking and other non-public ranges are
+// never sent to the remote proxy.
+var privateSpecialCIDRs = []string{
+	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+	"169.254.0.0/16", "172.16.0.0/12",
+	"192.0.0.0/29", "192.0.0.8/32", "192.0.0.9/32", "192.0.0.10/32",
+	"192.0.0.170/32", "192.0.0.171/32", "192.0.2.0/24", "192.52.193.0/24",
+	"192.88.99.2/32", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+	"203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "255.255.255.255/32",
+	"::1/128", "::/128", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64",
+	"100:0:0:1::/64", "2001::/32", "2001:1::1/128", "2001:1::2/128",
+	"2001:1::3/128", "2001:2::/48", "2001:3::/32", "2001:20::/28",
+	"2001:30::/28", "2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16",
+	"fc00::/7", "fe80::/10", "ff00::/8",
+}
+
+// localDomainRules sends local and router-only names direct before any DNS
+// resolution happens, so a remote DNS server cannot break them.
+var localDomainRules = []string{
+	"domain:lan", "domain:localdomain", "domain:localhost", "domain:home.arpa",
+	"domain:internal", "domain:local", "domain:example", "domain:invalid",
+	"domain:test", "dotless:",
+	"domain:router.asus.com", "domain:tplogin.cn", "domain:tplinkwifi.net",
+	"domain:tplinkrepeater.net", "domain:miwifi.com", "domain:routerlogin.net",
+	"domain:orbilogin.com", "domain:orbilogin.net", "domain:fritz.box",
+	"domain:tendawifi.com",
+}
+
 // buildJSON renders the server fields and the shared global settings into a
 // full xray JSON config, with stats and policy enabled so the UI can read
 // traffic counters.
@@ -238,13 +269,12 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 		setSockoptInterface(direct, bypass)
 	}
 
-	// Simple routing: private ranges always go direct; presets add more.
-	// Private ranges are spelled out as CIDRs so no geoip.dat asset is needed.
+	// Simple routing: private ranges and local names always go direct;
+	// presets add more. Ranges are spelled out so no geoip.dat asset is
+	// needed beyond the embedded CN list.
 	rules := []any{
-		map[string]any{"type": "field", "ip": []string{
-			"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
-			"169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
-		}, "outboundTag": "direct"},
+		map[string]any{"type": "field", "ip": privateSpecialCIDRs, "outboundTag": "direct"},
+		map[string]any{"type": "field", "domain": localDomainRules, "outboundTag": "direct"},
 	}
 	outbounds := []any{proxy, direct}
 	if helper {
@@ -307,6 +337,9 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 			},
 		},
 		"inbounds": inbounds,
+	}
+	if dnsCfg := buildDNSConfig(g); dnsCfg != nil {
+		cfg["dns"] = dnsCfg
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

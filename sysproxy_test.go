@@ -7,7 +7,15 @@ import (
 
 func TestPACTemplate(t *testing.T) {
 	pac := strings.Replace(pacTemplate, "%s", "127.0.0.1:10808", 1)
-	for _, want := range []string{"FindProxyForURL", "PROXY 127.0.0.1:10808", "DIRECT"} {
+	for _, want := range []string{
+		"FindProxyForURL", "PROXY 127.0.0.1:10808", "DIRECT",
+		`"*.local"`, `"*.lan"`, `"*.home.arpa"`,
+		`isInNet(host, "10.0.0.0", "255.0.0.0")`,
+		`isInNet(host, "100.64.0.0", "255.192.0.0")`,
+		`isInNet(host, "172.16.0.0", "255.240.0.0")`,
+		`isInNet(host, "192.168.0.0", "255.255.0.0")`,
+		`isInNet(host, "198.18.0.0", "255.254.0.0")`,
+	} {
 		if !strings.Contains(pac, want) {
 			t.Errorf("PAC file missing %q; got %s", want, pac)
 		}
