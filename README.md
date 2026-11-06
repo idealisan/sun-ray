@@ -38,7 +38,13 @@
 sun-ray/
 ├── main.go       # GUI：mygo 原生 UI（窗口、表单、按钮、日志）
 ├── core.go       # xray-core 进程内封装：配置生成、启停、日志、流量
+├── protocols.go  # 各协议的出站/传输层/安全层配置生成
+├── dns.go        # DNS 预设（系统 / 阿里 / Cloudflare / DoH / 自定义）
+├── sysproxy*.go  # 系统代理（手动 / PAC）各平台实现
+├── speedtest.go  # 测速的客户端逻辑（延迟 + 下载）
+├── gui_speedtest.go # 测速的临时内核调度与结果展示
 ├── subscription.go # 订阅拉取、分享链接解析与节点导入
+├── tun*.go       # TUN 模式与特权 helper
 ├── main_test.go  # headless UI 测试 + 内核启停冒烟测试
 ├── integration/  # 按协议端到端测试（本地上游 + curl）
 ├── go.mod        # replace ./mygo、./xray-core
@@ -160,26 +166,48 @@ git push origin v0.1.0
 
 ## 当前功能
 
-- 入站：本机 SOCKS5 + HTTP 代理，端口可配，可允许局域网
-- 出站协议：vless / vmess / trojan / shadowsocks / freedom，可配 TLS 与 SNI
-- 订阅管理：新增、编辑、复制、删除和批量删除；从订阅 URL 拉取 Base64 或明文节点链接（VLESS / VMess / Trojan / Shadowsocks / Hysteria2），更新时保留同名节点的测量结果
+### 入站与出站
+
+- 入站：SOCKS5 与 HTTP 共用一个混合端口（自动识别客户端协议），端口可配，可允许局域网
+- 出站协议：vless / vmess / trojan / shadowsocks / wireguard / hysteria2 / masque / freedom
+- 传输层：tcp / websocket / gRPC / httpupgrade；安全层：none / TLS / REALITY
 - 启动 / 停止：直接调用 `core.Instance` 的函数，无子进程
 - 实时流量速率（每秒采样 xray stats 计数器）
-- 运行日志面板（xray 日志经 `log.RegisterHandler` 回调到 GUI）
+
+### 系统代理与路由
+
+- 系统代理一键设置：手动模式 / PAC 模式 / 不修改，退出或切换时自动清理，代理环境变量可复制到剪贴板供终端使用
+- 路由预设：绕过大陆（geosite:cn / geoip:cn 直连）、屏蔽广告（geosite:category-ads-all）
+- 域名解析策略（Domain Strategy）：
+  - **AsIs**（默认）：不解析域名，国内站靠域名规则直连，翻墙域名没有本地 DNS 开销，不受 DNS 污染影响
+  - **IPIfNonMatch**：未命中域名规则时解析域名按 geoip:cn 分流，判定更全面，但每个翻墙域名都要先做一次本地 DNS 查询
+- DNS 预设：系统默认 / 阿里 DNS / 阿里 DoH / Cloudflare / Cloudflare DoH / 自定义。这里的 DNS 只为分流判定服务，翻墙流量的域名始终由远端服务器解析
+
+### 服务器列表与订阅
+
+- 服务器管理：新增、编辑、复制、删除，支持多选批量操作与列表排序
+- 分组筛选：按订阅分组或未分组过滤，工具栏显示计数
+- 「设为当前」「编辑」作用于光标所在行；批量操作与测速跟随选中行 ∩ 当前筛选，永远与列表 UI 一致
+- 订阅管理：新增、编辑、复制、删除和批量删除；从订阅 URL 拉取 Base64 或明文节点链接（VLESS / VMess / Trojan / Shadowsocks / Hysteria2），更新时保留同名节点的测量结果
 - 关闭主窗口后留在菜单栏 / 任务栏托盘，右键菜单可重新打开或退出
-- 延迟与速度测试：列表内联显示"延迟"与"速度"两列，工具栏「测试」按钮对选中项（未选中则全部）逐个测量
+
+### 测速与日志
+
+- 延迟与速度测试：列表内联显示"延迟"与"速度"两列
   - 延迟：经该节点访问 Cloudflare 204 端点的**首字节到达时间**（3 次取中位数，所有协议通用）
   - 速度：经该节点下载 Cloudflare 50MB，3 并发、限时 10 秒
   - 测量走**临时内核 + 随机回环端口**（`127.0.0.1`），不占用也不对外暴露用户配置的端口
+  - 右键菜单的「测试」在多选时测整个选中集；测速目标永远不超过当前筛选后可见的列表
+- 运行日志面板：级别跟随全局设置的日志级别，保留最近 200 行，避免无限增长
 
 ## Roadmap
 
-- [ ] 配置持久化（保存/加载服务器列表）
+- [x] 配置持久化（`~/sunray.json` 保存/加载服务器列表）
 - [x] 订阅导入（常见分享链接）
-- [ ] 路由规则编辑（分流、黑白名单）
-- [ ] 系统代理一键设置（各平台）
-- [ ] 更多传输层：WebSocket / gRPC / REALITY
-- [ ] 多平台打包分发
+- [x] 系统代理一键设置（macOS / Windows / Linux，手动与 PAC）
+- [x] 更多传输层与安全层：WebSocket / gRPC / HTTPUpgrade / REALITY
+- [x] 多平台打包分发（CI 三平台 + GitHub Release）
+- [ ] 路由规则编辑（自定义分流、黑白名单）
 
 ## License
 
