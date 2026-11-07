@@ -4,11 +4,19 @@ package main
 // the current user, so new processes (terminals, tools) pick them up.
 
 import (
+	"fmt"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
+
+// envProxyCommands returns the PowerShell commands that set the proxy
+// environment variables in the current session. The copy button offers
+// these on every platform; Unix has its own shell variant.
+func envProxyCommands(addr string) string {
+	return fmt.Sprintf("$env:HTTP_PROXY='http://%s'\n$env:HTTPS_PROXY='http://%s'\n$env:ALL_PROXY='socks5://%s'\n$env:NO_PROXY='localhost,127.0.0.1,::1'", addr, addr, addr)
+}
 
 // applyEnvProxy sets or removes the proxy environment variables. It
 // returns the shell commands to copy, which Windows does not need.

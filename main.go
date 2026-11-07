@@ -117,25 +117,20 @@ type app struct {
 	subUpdating  map[string]bool
 }
 
-// syncEnvProxy sets the proxy environment variables for the user. Windows
-// gets real user variables, macOS and Linux get the shell commands
-// copied to the clipboard.
+// syncEnvProxy sets the proxy environment variables for the user. Only
+// Windows can do that; on macOS and Linux the checkbox is disabled and the
+// copy button below hands the user the commands instead.
 func (a *app) syncEnvProxy(g *globalConfig) {
+	if runtime.GOOS != "windows" {
+		return
+	}
 	addr := "127.0.0.1:" + g.ListenPort
 	if g.EnvProxy == a.lastEnvProxy && addr == a.lastEnvAddr {
 		return
 	}
 	a.lastEnvProxy, a.lastEnvAddr = g.EnvProxy, addr
-	commands, err := applyEnvProxy(g.EnvProxy, addr)
-	if err != nil {
+	if _, err := applyEnvProxy(g.EnvProxy, addr); err != nil {
 		a.addLog("[sun-ray] 代理环境变量设置失败: " + err.Error())
-		return
-	}
-	if commands != "" {
-		if a.win != nil {
-			mygo.Clipboard.WriteText(commands)
-		}
-		a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
 		return
 	}
 	if g.EnvProxy {
@@ -595,7 +590,12 @@ func (a *app) globalTab(c *ui.Context) {
 			})
 			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
-			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）")
+			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）").Disabled(runtime.GOOS != "windows")
+			if ui.Button(c.Key("copyenvcmd"), "复制环境变量命令").Clicked() && a.win != nil {
+				addr := "127.0.0.1:" + g.ListenPort
+				mygo.Clipboard.WriteText(envProxyCommands(addr))
+				a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
+			}
 			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，Windows/Linux 有效）")
 			a.syncEnvProxy(g)
 
