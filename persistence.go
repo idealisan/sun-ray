@@ -32,30 +32,32 @@ func configPath() string {
 	return filepath.Join(home, "sunray.json")
 }
 
-// loadConfig reads the saved config; missing or broken files fall back to
-// the defaults so the app always starts. Only the current format is read:
-// there is no migration from older, single-server files.
-func loadConfig() appConfig { return loadConfigFrom(configPath()) }
+// loadConfig reads the saved config. A missing file is not an error: the app
+// starts with the defaults. A file that exists but cannot be read or parsed
+// is an error, and the caller must not write over it.
+func loadConfig() (appConfig, error) { return loadConfigFrom(configPath()) }
 
-// loadConfigFrom reads a config file; a missing or broken file falls back to the
-// defaults.
-func loadConfigFrom(path string) appConfig {
-	cfg, err := loadConfigFile(path)
-	if err != nil {
-		return defaultAppConfig()
-	}
-	return cfg
-}
-
-// loadConfigFile is loadConfigFrom with the error kept, for test mode.
-func loadConfigFile(path string) (appConfig, error) {
+// loadConfigFrom reads a config file. A missing file yields the defaults and
+// no error; a broken one yields the error, so the caller can ask the user
+// what to do instead of silently replacing what is on disk.
+func loadConfigFrom(path string) (appConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return defaultAppConfig(), nil
+		}
 		return appConfig{}, err
 	}
+	return parseConfig(data, path)
+}
+
+// parseConfig turns the bytes of a config file into a config. A file that
+// does not parse, or that names no servers, is broken: the caller must not
+// write over it.
+func parseConfig(data []byte, path string) (appConfig, error) {
 	var saved appConfig
 	if err := json.Unmarshal(data, &saved); err != nil {
-		return appConfig{}, err
+		return appConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	// A missing "servers" key means the file is incomplete; an explicit
 	// empty list is valid, so the user can delete every server.
@@ -87,6 +89,16 @@ func loadConfigFile(path string) (appConfig, error) {
 	return saved, nil
 }
 
+// loadConfigFile is parseConfig with the file read, for the headless build
+// and the tests.
+func loadConfigFile(path string) (appConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return appConfig{}, err
+	}
+	return parseConfig(data, path)
+}
+
 // saveConfig writes the config atomically (temp file + rename).
 func saveConfig(cfg appConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -105,6 +117,12 @@ func saveConfig(cfg appConfig) error {
 type configSaver struct {
 	lastJSON string
 	lastSave time.Time
+	// blocked stops every write. It is set while the config on disk
+	// failed to load, so nothing can replace that file before the user
+	// says what to do with it.
+	blocked bool
+	// onError is told when a write failed, so the user can be warned.
+	onError func(error)
 }
 
 // remember records cfg as already persisted, so the first frame does not
@@ -116,8 +134,12 @@ func (s *configSaver) remember(cfg appConfig) {
 }
 
 // maybeSave persists the config when it changed, at most once per debounce
-// interval. Runs on the UI thread (called from view and start/stop).
+// interval. Runs on the UI thread (called from view and start/stop). A
+// failed write is reported through onError and leaves the file as it was.
 func (s *configSaver) maybeSave(cfg appConfig, force bool) {
+	if s.blocked {
+		return
+	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return
@@ -129,6 +151,9 @@ func (s *configSaver) maybeSave(cfg appConfig, force bool) {
 		return
 	}
 	if err := saveConfig(cfg); err != nil {
+		if s.onError != nil {
+			s.onError(err)
+		}
 		return // file errors are not fatal; keep the app running
 	}
 	s.lastJSON = string(data)

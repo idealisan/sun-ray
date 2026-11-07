@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -711,5 +714,202 @@ func TestGlobalTabDomainStrategySwitch(t *testing.T) {
 	tt.Frame()
 	if a.cfg.Global.DomainStrategy != dsAsIs {
 		t.Fatalf("after unchecking = %q, want asis", a.cfg.Global.DomainStrategy)
+	}
+}
+
+// A config file that fails to load must never be written over: the saver is
+// blocked until the user says to create a new config, and only then does it
+// write.
+func TestBrokenConfigIsNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sunray.json")
+	broken := []byte(`{"global":{},"servers":[{"id":"a"`) // truncated
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	old := configFileOverride
+	defer func() { configFileOverride = old }()
+	configFileOverride = path
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("a broken config should be an error")
+	} else {
+		a := &app{cfg: defaultAppConfig(), cursor: -1}
+		a.saver.blocked = true
+		a.configBroken = err.Error()
+		a.saver.remember(a.cfg)
+
+		// A change in the app must not reach the file while it is blocked.
+		a.cfg.Servers = append(a.cfg.Servers, serverConfig{ID: "x", Name: "X"})
+		a.saver.maybeSave(a.cfg, true)
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(broken) {
+			t.Fatalf("the broken file was written over: %s", got)
+		}
+	}
+}
+
+// Choosing to create a new config is what lets the app write again.
+func TestNewConfigOverwritesBrokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sunray.json")
+	broken := []byte(`{"global":{},"servers":[{"id":"a"`)
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	old := configFileOverride
+	defer func() { configFileOverride = old }()
+	configFileOverride = path
+
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.saver.blocked = true
+	a.saver.remember(a.cfg)
+
+	// The user chooses a new config: writing is allowed again.
+	a.saver.blocked = false
+	a.saver.lastJSON = ""
+	a.saver.maybeSave(a.cfg, true)
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved appConfig
+	if err := json.Unmarshal(got, &saved); err != nil {
+		t.Fatalf("the new config is not valid JSON: %v", err)
+	}
+	if len(saved.Servers) == 0 {
+		t.Fatal("the new config should have a server")
+	}
+}
+
+// A failed write is reported, so the user can be told.
+func TestSaveFailureIsReported(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	var got error
+	a.saver.onError = func(err error) { got = err }
+	a.saver.lastJSON = ""
+	// A path that cannot be written to.
+	old := configFileOverride
+	defer func() { configFileOverride = old }()
+	configFileOverride = filepath.Join(t.TempDir(), "missing-dir", "sunray.json")
+	a.saver.maybeSave(a.cfg, true)
+	if got == nil {
+		t.Fatal("a failed write should be reported")
+	}
+}
+
+// The alert for a broken config asks the user what to do. Until they
+// answer, the file stays as it is.
+func TestConfigBrokenAlert(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sunray.json")
+	broken := []byte(`{"global":{},"servers":[{"id":"a","name":"A"}`)
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := configFileOverride
+	defer func() { configFileOverride = old }()
+	configFileOverride = path
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("a broken config should be an error")
+	}
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.saver.blocked = true
+	a.configBroken = err.Error()
+	a.alertKind = alertConfigBroken
+	a.alertOpen = true
+	a.saver.onError = a.reportSaveFailed
+	a.saver.remember(a.cfg)
+
+	tt := ui.NewTester(a.view, 880, 620)
+	for _, want := range []string{"配置文件校验失败，无法加载", "退出", "创建全新配置"} {
+		if !tt.HasText(want) {
+			t.Errorf("the alert is missing %q; texts: %v", want, tt.Texts())
+		}
+	}
+
+	// The alert stays up until the user answers.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !tt.HasText("配置文件校验失败，无法加载") {
+		t.Fatal("Escape should leave the alert up")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(broken) {
+		t.Fatalf("the broken file was written over: %s", got)
+	}
+}
+
+// Answering the alert with a new config lets the app write again.
+func TestConfigBrokenAlertNewConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sunray.json")
+	if err := os.WriteFile(path, []byte(`{"global":{},"servers":[{"id":"a"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := configFileOverride
+	defer func() { configFileOverride = old }()
+	configFileOverride = path
+
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.saver.blocked = true
+	a.configBroken = "broken"
+	a.alertKind = alertConfigBroken
+	a.alertOpen = true
+	a.saver.onError = a.reportSaveFailed
+	a.saver.remember(a.cfg)
+
+	tt := ui.NewTester(a.view, 880, 620)
+	if err := tt.Click("创建全新配置"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.saver.blocked {
+		t.Error("writing should be allowed after choosing a new config")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved appConfig
+	if err := json.Unmarshal(got, &saved); err != nil {
+		t.Fatalf("the new config is not valid JSON: %v", err)
+	}
+	if len(saved.Servers) == 0 {
+		t.Error("the new config should have a server")
+	}
+}
+
+// A write that failed warns the user, with a single button.
+func TestSaveFailedAlert(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.saver.remember(a.cfg)
+	a.saveFailed = "disk is full"
+	a.alertKind = alertSaveFailed
+	a.alertOpen = true
+
+	tt := ui.NewTester(a.view, 880, 620)
+	for _, want := range []string{"配置文件写入失败", "disk is full", "确定"} {
+		if !tt.HasText(want) {
+			t.Errorf("the warning is missing %q; texts: %v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("确定"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.alertKind != alertNone || a.saveFailed != "" {
+		t.Errorf("the warning should be gone: kind=%v message=%q", a.alertKind, a.saveFailed)
 	}
 }

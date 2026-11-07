@@ -65,6 +65,10 @@ type app struct {
 	quitting       bool                  // a real quit is under way, so closing may proceed
 	tab            int                   // selected tab in the main window
 	saver          configSaver           // debounced persistence to ~/sunray.json
+	configBroken   string                // why the config on disk failed to load, if it did
+	saveFailed     string                // why the last write failed, if it did
+	alertOpen      bool                  // a modal alert is showing
+	alertKind      int                   // which alert: alertConfigBroken or alertSaveFailed
 	tests          map[string]*testState // per server measurement results
 	lastProxyMode  string                // the mode the system proxy was set to
 	lastProxyAddr  string                // the address it was set to
@@ -319,6 +323,12 @@ func (a *app) start() {
 func (a *app) startLocked() {
 	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
+	if a.configBroken != "" {
+		// The config on disk is broken and the user has not chosen what
+		// to do about it yet: do not run with the placeholder servers.
+		a.addLog("[sun-ray] 配置文件校验失败，请先处理弹出的提示")
+		return
+	}
 	s := a.activeServer()
 	if s == nil {
 		a.addLog("[sun-ray] 没有可用的服务器")
@@ -481,6 +491,8 @@ func (a *app) view(c *ui.Context) {
 	running := a.core.Running()
 	a.watchConfig()
 	a.saver.maybeSave(a.cfg, false)
+	a.showConfigAlert(c)
+	a.showSaveFailed(c)
 
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
 		// Header: title, active server, live speeds, status, start/stop.
@@ -1769,7 +1781,19 @@ func main() {
 	// The software rasterizer uses much less memory than the GPU, which the
 	// patched mygo asks for when MYGO_WARP is set. macOS draws with Metal,
 	// which has no software fallback, so the setting does nothing there.
-	a := &app{cfg: loadConfig(), cursor: -1, subCursor: -1, tests: map[string]*testState{}}
+	cfg, loadErr := loadConfig()
+	a := &app{cfg: cfg, cursor: -1, subCursor: -1, tests: map[string]*testState{}}
+	if loadErr != nil {
+		// The file is there but cannot be used. Keep it as it is and ask
+		// the user what to do; until they say so, nothing may write it.
+		a.cfg = defaultAppConfig()
+		a.saver.blocked = true
+		a.configBroken = loadErr.Error()
+		a.alertKind = alertConfigBroken
+		a.alertOpen = true
+		a.addLog("[sun-ray] 配置文件校验失败: " + loadErr.Error())
+	}
+	a.saver.onError = a.reportSaveFailed
 	a.tunMTU = strconv.FormatFloat(a.cfg.Global.TunMTU, 'f', 0, 64)
 	if a.cfg.Global.SoftRender {
 		switch runtime.GOOS {

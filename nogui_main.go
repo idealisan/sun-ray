@@ -60,7 +60,14 @@ func main() {
 		}
 		cfg = loaded
 	} else {
-		cfg = loadConfigFrom(path)
+		// There is no interface here to ask what to do about a config
+		// that fails to load, so say what is wrong and stop. The headless
+		// build never writes the config, so the file stays as it is.
+		loaded, err := loadConfigFrom(path)
+		if err != nil {
+			log.Fatalf("配置文件校验失败: %v", err)
+		}
+		cfg = loaded
 	}
 	s := activeServerOf(cfg)
 	if s == nil {

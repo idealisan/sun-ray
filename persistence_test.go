@@ -52,24 +52,35 @@ func TestLoadConfigFileEmptyServerList(t *testing.T) {
 func TestLoadConfigFileErrors(t *testing.T) {
 	dir := t.TempDir()
 	for name, data := range map[string]string{
-		"missing":    "",
 		"broken":     "{",
 		"no-servers": `{"global":{}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(dir, name+".json")
-			if data != "" {
-				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-					t.Fatal(err)
-				}
+			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
 			}
 			if _, err := loadConfigFile(path); err == nil {
 				t.Fatal("loadConfigFile should fail")
 			}
-			if got := loadConfigFrom(path); got.Global.ListenPort != defaultAppConfig().Global.ListenPort {
-				t.Fatalf("loadConfigFrom did not fall back to defaults: %+v", got.Global)
+			// A broken file is an error, so the caller can keep it as it
+			// is and ask the user what to do.
+			if _, err := loadConfigFrom(path); err == nil {
+				t.Fatal("loadConfigFrom should report the broken file")
 			}
 		})
+	}
+}
+
+// A missing config file is not an error: the app starts with the defaults.
+func TestLoadConfigFromMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	cfg, err := loadConfigFrom(path)
+	if err != nil {
+		t.Fatalf("a missing file should not be an error: %v", err)
+	}
+	if cfg.Global.ListenPort != defaultAppConfig().Global.ListenPort {
+		t.Fatalf("loadConfigFrom did not fall back to defaults: %+v", cfg.Global)
 	}
 }
 
