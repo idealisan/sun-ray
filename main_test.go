@@ -664,3 +664,52 @@ func TestSortByResults(t *testing.T) {
 		t.Fatalf("latency descending = %v, want [a b c]", got)
 	}
 }
+
+// The domain strategy is a switch: on selects IPIfNonMatch, off AsIs. The
+// DNS block below it is disabled while the switch is off, since it only
+// serves the resolution that IPIfNonMatch does.
+func TestGlobalTabDomainStrategySwitch(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if a.cfg.Global.DomainStrategy != dsAsIs {
+		t.Fatalf("default = %q, want asis", a.cfg.Global.DomainStrategy)
+	}
+	if !tt.HasText("解析列表外的域名，并根据 IP 进一步路由") {
+		t.Fatal("missing the domain strategy switch")
+	}
+
+	// Off: the DNS selector is disabled, so clicking it opens no options.
+	if err := tt.Click("系统默认"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("阿里加密 DNS（DoH）") {
+		t.Fatal("DNS options opened while the switch was off")
+	}
+
+	if err := tt.Click("解析列表外的域名，并根据 IP 进一步路由"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cfg.Global.DomainStrategy != dsIPIfNonMatch {
+		t.Fatalf("after checking = %q, want ipifnonmatch", a.cfg.Global.DomainStrategy)
+	}
+	// On: the same click now opens the DNS options.
+	if err := tt.Click("系统默认"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("阿里加密 DNS（DoH）") {
+		t.Fatal("DNS options did not open with the switch on")
+	}
+
+	// Close the popup before toggling the switch again, or it covers it.
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if err := tt.Click("解析列表外的域名，并根据 IP 进一步路由"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.cfg.Global.DomainStrategy != dsAsIs {
+		t.Fatalf("after unchecking = %q, want asis", a.cfg.Global.DomainStrategy)
+	}
+}

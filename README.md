@@ -178,10 +178,8 @@ git push origin v0.1.0
 
 - 系统代理一键设置：手动模式 / PAC 模式 / 不修改，退出或切换时自动清理，代理环境变量可复制到剪贴板供终端使用
 - 路由预设：绕过大陆（geosite:cn / geoip:cn 直连）、屏蔽广告（geosite:category-ads-all）
-- 域名解析策略（Domain Strategy）：
-  - **AsIs**（默认）：不解析域名，国内站靠域名规则直连，翻墙域名没有本地 DNS 开销，不受 DNS 污染影响
-  - **IPIfNonMatch**：未命中域名规则时解析域名按 geoip:cn 分流，判定更全面，但每个翻墙域名都要先做一次本地 DNS 查询
-- DNS 预设：系统默认 / 阿里 DNS / 阿里 DoH / Cloudflare / Cloudflare DoH / 自定义。这里的 DNS 只为分流判定服务，翻墙流量的域名始终由远端服务器解析
+- 域名解析策略：默认关闭，即不解析列表之外的域名（AsIs）——国内站靠域名规则直连，翻墙域名没有本地 DNS 开销、不受 DNS 污染影响。勾选「解析列表外的域名，并根据 IP 进一步路由」后切换为 IPIfNonMatch，分流判定更全面，但每个翻墙域名都要先做一次本地 DNS 查询
+- DNS 预设：系统默认 / 阿里 DNS / 阿里 DoH / Cloudflare / Cloudflare DoH / 自定义。这里的 DNS 只为分流判定服务，翻墙流量的域名始终由远端服务器解析；上面的开关关闭时这一栏会整体禁用，因为此时不生效
 
 ### 服务器列表与订阅
 

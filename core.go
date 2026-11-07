@@ -132,14 +132,6 @@ const (
 	dsIPIfNonMatch = "ipifnonmatch" // resolve domains only to match IP rules
 )
 
-// domainStrategyOptions drive the picker in the global settings tab.
-var domainStrategyOptions = []struct {
-	Key, Label string
-}{
-	{dsAsIs, "AsIs"},
-	{dsIPIfNonMatch, "IPIfNonMatch"},
-}
-
 // xrayDomainStrategy maps the stored key to the value xray expects; empty
 // or unknown values fall back to AsIs.
 func xrayDomainStrategy(key string) string {

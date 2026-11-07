@@ -643,26 +643,30 @@ func (a *app) globalTab(c *ui.Context) {
 			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
 
 			ui.Text(c, "域名解析策略").Bold()
-			ui.Field(c, "Domain Strategy", func() {
-				ui.RadioGroup(c, func() {
-					ui.Row(c).Gap(14).Children(func() {
-						for _, opt := range domainStrategyOptions {
-							ui.Radio(c, &g.DomainStrategy, opt.Key, opt.Label)
-						}
-					})
-				})
-			})
-			ui.Text(c, "AsIs：不解析域名。国内站靠 geosite:cn 域名规则直连，翻墙域名没有本地 DNS 开销，不受 DNS 污染影响（推荐）").TextColor(t.TextMuted)
-			ui.Text(c, "IPIfNonMatch：未命中域名规则时把域名解析成 IP 再按 geoip:cn 分流，判定更全面，但每个翻墙域名都要先查一次本地 DNS，DNS 被污染时会拖慢甚至打断连接").TextColor(t.TextMuted)
-
-			ui.Text(c, "DNS").Bold()
-			renderChoiceLabels(c, "DNS 服务器", &g.DNSPreset, dnsPresetValues, dnsPresetLabels)
-			if g.DNSPreset == dnsPresetCustom {
-				ui.Field(c, "自定义 DNS（逗号或空格分隔，支持 IP 与 DoH URL）", func() {
-					ui.TextInput(c, &g.DNSCustom).Placeholder("223.5.5.5, https://dns.alidns.com/dns-query")
-				})
+			// Presented as a switch rather than xray's technical terms:
+			// on resolves domains the domain rules missed and routes by IP
+			// (IPIfNonMatch); off keeps their names as they are (AsIs).
+			resolveOther := g.DomainStrategy == dsIPIfNonMatch
+			ui.Checkbox(c, &resolveOther, "解析列表外的域名，并根据 IP 进一步路由")
+			// Leave an empty (older config) value alone: it already means
+			// AsIs, and rewriting it would restart the core for nothing.
+			switch {
+			case resolveOther && g.DomainStrategy != dsIPIfNonMatch:
+				g.DomainStrategy = dsIPIfNonMatch
+			case !resolveOther && g.DomainStrategy == dsIPIfNonMatch:
+				g.DomainStrategy = dsAsIs
 			}
-			ui.Text(c, "这里的 DNS 只为分流判定服务：未命中域名规则的域名先解析出 IP，再查 geoip:cn 决定直连或走代理；翻墙流量的域名始终由远端服务器解析，不经过这里").TextColor(t.TextMuted)
+
+			ui.Column(c).Gap(8).Disabled(!resolveOther).Children(func() {
+				ui.Text(c, "DNS").Bold()
+				renderChoiceLabels(c, "DNS 服务器", &g.DNSPreset, dnsPresetValues, dnsPresetLabels)
+				if g.DNSPreset == dnsPresetCustom {
+					ui.Field(c, "自定义 DNS（逗号或空格分隔，支持 IP 与 DoH URL）", func() {
+						ui.TextInput(c, &g.DNSCustom).Placeholder("223.5.5.5, https://dns.alidns.com/dns-query")
+					})
+				}
+				ui.Text(c, "这里的 DNS 只为分流判定服务：未命中域名规则的域名先解析出 IP，再查 geoip:cn 决定直连或走代理；翻墙流量的域名始终由远端服务器解析，不经过这里").TextColor(t.TextMuted)
+			})
 			a.updateTrayTip()
 		})
 	})
