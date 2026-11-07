@@ -628,3 +628,39 @@ func TestAppendLogLineCapsChars(t *testing.T) {
 		t.Fatalf("log runes = %d, chars = %d, want <= 50", utf8.RuneCountInString(got), chars)
 	}
 }
+
+// Sorting by latency or speed orders by the last measurement, and servers
+// without one go last whichever direction.
+func TestSortByResults(t *testing.T) {
+	a := &app{cfg: defaultAppConfig()}
+	a.cfg.Servers = []serverConfig{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	a.cfg.Results = map[string]serverResult{
+		"a": {LatencyMs: 300, SpeedBps: 1000},
+		"b": {LatencyMs: 100, SpeedBps: 3000},
+	}
+	ids := func() []string {
+		out := make([]string, 0, len(a.cfg.Servers))
+		for _, s := range a.cfg.Servers {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+
+	a.sort = ui.SortOrder{Column: "latency"}
+	a.applySort()
+	if got := ids(); len(got) != 3 || got[0] != "b" || got[1] != "a" || got[2] != "c" {
+		t.Fatalf("latency ascending = %v, want [b a c]", got)
+	}
+
+	a.sort = ui.SortOrder{Column: "speed", Descending: true}
+	a.applySort()
+	if got := ids(); len(got) != 3 || got[0] != "b" || got[1] != "a" || got[2] != "c" {
+		t.Fatalf("speed descending = %v, want [b a c]", got)
+	}
+
+	a.sort = ui.SortOrder{Column: "latency", Descending: true}
+	a.applySort()
+	if got := ids(); len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("latency descending = %v, want [a b c]", got)
+	}
+}

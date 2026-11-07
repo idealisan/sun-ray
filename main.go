@@ -744,8 +744,8 @@ func (a *app) serverListTab(c *ui.Context) {
 			{Title: "协议", ID: "protocol", Width: 100, Sortable: true},
 			{Title: "地址", ID: "address", Sortable: true},
 			{Title: "端口", ID: "port", Width: 80, Align: ui.End, Sortable: true},
-			{Title: "延迟", ID: "latency", Width: 90, Align: ui.End},
-			{Title: "速度", ID: "speed", Width: 110, Align: ui.End},
+			{Title: "延迟", ID: "latency", Width: 90, Align: ui.End, Sortable: true},
+			{Title: "速度", ID: "speed", Width: 110, Align: ui.End, Sortable: true},
 		}
 		dbl := -1
 		var deleteIDs []string
@@ -1494,6 +1494,10 @@ func (a *app) applySort() {
 	if a.sort.Column == "" {
 		return
 	}
+	if a.sort.Column == "latency" || a.sort.Column == "speed" {
+		a.sortByResult()
+		return
+	}
 	sort.SliceStable(a.cfg.Servers, func(i, j int) bool {
 		x, y := a.cfg.Servers[i], a.cfg.Servers[j]
 		var xi, yi string
@@ -1516,13 +1520,48 @@ func (a *app) applySort() {
 	})
 }
 
+// sortByResult orders the servers by their last measurement of the sorted
+// column. Servers without one go last, whichever the direction.
+func (a *app) sortByResult() {
+	value := func(s serverConfig) (float64, bool) {
+		r, ok := a.cfg.Results[s.ID]
+		if !ok {
+			return 0, false
+		}
+		if a.sort.Column == "latency" {
+			if r.LatencyMs <= 0 {
+				return 0, false
+			}
+			return float64(r.LatencyMs), true
+		}
+		if r.SpeedBps <= 0 {
+			return 0, false
+		}
+		return r.SpeedBps, true
+	}
+	sort.SliceStable(a.cfg.Servers, func(i, j int) bool {
+		xv, xok := value(a.cfg.Servers[i])
+		yv, yok := value(a.cfg.Servers[j])
+		if xok != yok {
+			return xok
+		}
+		if !xok {
+			return false
+		}
+		if a.sort.Descending {
+			return xv > yv
+		}
+		return xv < yv
+	})
+}
+
 // logTab: the run log, inline in the main window. The text is selectable
 // (drag, double-click, Ctrl+C) and a button copies everything at once.
 func (a *app) logTab(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).Padding(0, 4, 8).Gap(6).Children(func() {
 		ui.Row(c).Children(func() {
-			ui.Text(c, "选中文本后 Ctrl+C 复制，或").TextColor(t.TextMuted).Grow(1)
+			ui.Text(c, "版本 "+versionString()+" · 选中文本后 Ctrl+C 复制，或").TextColor(t.TextMuted).Grow(1)
 			if ui.Button(c.Key("copylog"), "复制全部日志").Clicked() {
 				mygo.Clipboard.WriteText(strings.Join(a.logs, "\n"))
 			}
