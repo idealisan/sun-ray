@@ -7,7 +7,7 @@ import (
 )
 
 // appVersion is the released version of the app.
-const appVersion = "0.18.8"
+const appVersion = "0.18.9"
 
 // versionString names the version and, when the binary was built from a
 // git checkout, the commit and date it came from.
