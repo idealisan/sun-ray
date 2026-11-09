@@ -13,3 +13,6 @@ node_modules/
 
 # local scratch scripts
 _*.py
+
+# Python
+__pycache__/

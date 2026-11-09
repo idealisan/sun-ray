@@ -103,6 +103,21 @@ git -C xray-core apply ../patches/xray-core-embedded-assets.patch
 
 若更新子模块，需确认补丁仍可应用（必要时重新生成）。
 
+### 每周自动更新 geo 数据
+
+`.github/workflows/geo-update.yml` 每周二（UTC 03:00）取上游最新数据并重建 `assets/geoip.dat` 与 `assets/geosite.dat`：
+
+- `geoip.dat` 来自 `v2fly/geoip` 每次 release 的 `cn.dat`（本身只含 CN 段）
+- `geosite.dat` 来自 `v2fly/domain-list-community` 的 `dlc.dat`，按 protobuf 线格式只保留 `CN` 与 `CATEGORY-ADS-ALL` 两条，维持约 400KB
+
+更新脚本是 `scripts/update-geo-assets.py`（纯 Python 标准库，无 pip 依赖），本地也可手动运行：
+
+```bash
+python3 scripts/update-geo-assets.py
+```
+
+数据有变化时，workflow 把新文件提交到 master，打 `v<版本>-<7位commit hash>-<年月日>` 标签（如 `v0.19.0-bf79793-20261110`），再触发 `build.yml` 三平台编译并发布 GitHub Release。程序里 `-version` / 日志 / 界面的版本串采用同一格式（去掉开头的 `v`）。数据未变化则整周跳过，不产生多余提交与 Release。
+
 ## TUN 模式
 
 TUN 模式接管**全部**流量，不依赖应用是否支持代理——服务器上跑、或不想逐个设置代理的程序（游戏、某些国产软件、容器）都能走代理。
@@ -156,6 +171,7 @@ GitHub Actions（`.github/workflows/build.yml`）：
 
 - push 到 master / PR：三平台（Linux amd64 / Windows amd64 / macOS arm64）编译 + Linux 上跑测试，产物存为 workflow artifact
 - 推送 `v*` 标签：三平台编译后自动创建 GitHub Release，并把二进制挂到 Release 资产上
+- 每周二定时刷新内嵌 geo 数据，提交后打带日期的标签并自动走正式 Release（见「每周自动更新 geo 数据」）
 
 发布新版：
 

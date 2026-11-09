@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"runtime/debug"
+	"strings"
 )
 
 // mygoManifest is the manifest MyGo builds the macOS app bundle from. It
@@ -31,12 +32,13 @@ func manifestVersion() string {
 }
 
 // versionString names the version and, when the binary was built from a
-// git checkout, the commit and date it came from.
+// git checkout, the short commit hash and the date it came from. This is
+// also the shape of the weekly geo build's release tag, so a binary and
+// its release agree: 0.19.0-bf79793-20261110.
 func versionString() string {
-	v := appVersion
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return v
+		return appVersion
 	}
 	var revision, built string
 	for _, setting := range info.Settings {
@@ -47,11 +49,19 @@ func versionString() string {
 			built = setting.Value
 		}
 	}
+	return formatVersion(appVersion, revision, built)
+}
+
+// formatVersion appends the short commit hash and the build date (YYYYMMDD)
+// to the manifest version. A hash or timestamp that is too short is ignored,
+// so a build outside a git checkout still reports just the version.
+func formatVersion(version, revision, built string) string {
+	v := version
 	if len(revision) >= 7 {
-		v += " (" + revision[:7] + ")"
+		v += "-" + revision[:7]
 	}
 	if len(built) >= 10 {
-		v += " " + built[:10]
+		v += "-" + strings.ReplaceAll(built[:10], "-", "")
 	}
 	return v
 }

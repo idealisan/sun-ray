@@ -1,0 +1,89 @@
+name: weekly geo assets
+
+on:
+  # Every Tuesday at 03:00 UTC. GitHub cron is UTC; the off-peak minute
+  # keeps this out of the queue of jobs that all fire on the hour.
+  schedule:
+    - cron: '0 3 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: weekly-geo-assets
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Refresh the embedded geo tables
+        id: geo
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/update-geo-assets.py
+
+      - name: Detect a change in the tables
+        id: diff
+        run: |
+          if git diff --quiet -- assets/geoip.dat assets/geosite.dat; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Upstream tables are unchanged; nothing to rebuild.'
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, tag, and start the release build
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GEOIP_TAG: ${{ steps.geo.outputs.geoip_tag }}
+          GEOSITE_TAG: ${{ steps.geo.outputs.geosite_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/geoip.dat assets/geosite.dat
+          git commit -F - <<EOF
+          chore: refresh embedded geo assets
+
+          geoip:   v2fly/geoip ${GEOIP_TAG}
+          geosite: v2fly/domain-list-community ${GEOSITE_TAG}
+          EOF
+          # Someone may have pushed while the tables were downloading.
+          git pull --rebase origin master
+          git push origin HEAD:master
+
+          DATE="$(date -u +%Y%m%d)"
+          SHORT="$(git rev-parse HEAD | cut -c1-7)"
+          MANIFEST="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' mygo.json)"
+          if [ -z "${MANIFEST}" ]; then
+            echo "::error::cannot read the version out of mygo.json"
+            exit 1
+          fi
+          TAG="v${MANIFEST}-${SHORT}-${DATE}"
+          echo "Release tag: ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; skipping the release build."
+            exit 0
+          fi
+          git tag "${TAG}"
+          git push origin "refs/tags/${TAG}"
+          # A push made with GITHUB_TOKEN does not start another workflow,
+          # so dispatch build.yml explicitly, pinned to the tagged commit.
+          # release_tag tells it which tag to publish.
+          gh workflow run build.yml --ref "${TAG}" -f release_tag="${TAG}"
