@@ -7,7 +7,6 @@ package main
 // window's own frame, so they follow the app's look.
 
 import (
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -29,8 +28,7 @@ func (a *app) showConfigAlert(c *ui.Context) {
 	switch ui.AlertDialog(c, &a.alertOpen, "配置文件校验失败，无法加载",
 		a.configBroken+"\n\n可以退出，或者创建全新配置（将覆盖原文件）。", "退出", "创建全新配置") {
 	case 0: // 退出
-		a.quitting = true
-		mygo.App.Quit()
+		a.quitForGood()
 	case 1: // 创建全新配置
 		a.alertKind = alertNone
 		a.alertOpen = false

@@ -63,6 +63,7 @@ type app struct {
 	tray           *mygo.Tray
 	trayToggle     *mygo.MenuItem        // start/stop entry in the tray menu
 	quitting       bool                  // a real quit is under way, so closing may proceed
+	quitRequested  bool                  // the user asked to quit for good, not to hide
 	tab            int                   // selected tab in the main window
 	saver          configSaver           // debounced persistence to ~/sunray.json
 	configBroken   string                // why the config on disk failed to load, if it did
@@ -1706,6 +1707,43 @@ func (a *app) toggleMain() {
 	a.showMain()
 }
 
+// hideToTray puts the window away and leaves the app running in the status
+// bar, the way closing the window does. It is what a quit that does not
+// mean "stop the proxy" turns into.
+func (a *app) hideToTray() {
+	if a.tray == nil {
+		// Without a tray there would be no way back, so let it quit.
+		a.quitRequested = true
+		a.quitting = true
+		mygo.App.Quit()
+		return
+	}
+	if a.win != nil && !a.win.IsDestroyed() {
+		a.win.Hide()
+	}
+}
+
+// quitForGood ends the app: the proxy stops and the tray goes away.
+func (a *app) quitForGood() {
+	a.quitRequested = true
+	a.quitting = true
+	mygo.App.Quit()
+}
+
+// onQuitRequested handles a quit the system asked for. Cmd+Q and the Dock's
+// Quit both end up here, and neither can be told apart from the other.
+// Neither means "stop the proxy", so they only put the window away and leave
+// the app running in the status bar. The tray's own Quit asks for a real
+// quit and says so.
+func (a *app) onQuitRequested(e *mygo.QuitEvent) {
+	if a.quitRequested {
+		a.quitting = true
+		return
+	}
+	e.PreventDefault()
+	a.hideToTray()
+}
+
 // coreActionLabel is the tray entry for the core's next action.
 func (a *app) coreActionLabel() string {
 	if a.core.Running() {
@@ -1762,7 +1800,10 @@ func (a *app) setUpTray() {
 		a.trayToggle,
 		{Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) { a.showMain() }},
 		mygo.Separator(),
-		{Role: mygo.RoleQuit},
+		// Not the quit role: that one quits for good like Cmd+Q does,
+		// and Cmd+Q only puts the window away. The tray's Quit is the
+		// one that ends the app.
+		{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) { a.quitForGood() }},
 	})
 	if runtime.GOOS == "linux" {
 		// AppIndicator only shows menus, so its icon opens this one.
@@ -1830,7 +1871,7 @@ func main() {
 	a.lastConfig = a.configFingerprint()
 	mygo.App.SetLocale("zh-Hans")
 	mygo.App.SetName("Sun Ray")
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	mygo.App.OnBeforeQuit(a.onQuitRequested)
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		a.saver.maybeSave(a.cfg, true)
 		_ = a.core.Stop()
