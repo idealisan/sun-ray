@@ -200,14 +200,30 @@ func (a *app) updateTrayTip() {
 	a.lastTrayTip = tip
 	a.tray.SetToolTip(tip)
 } // configFingerprint describes the settings the core runs with, so the app
-// can tell when a change needs the core to restart.
+// can tell when a change needs the core to restart. Settings that only
+// affect the UI, the system proxy or the environment are cleared first:
+// changing them must not tear down a running core. Everything else stays in
+// by default, so a newly added core setting is picked up automatically —
+// the worst case is one extra restart, never a missed one.
 func (a *app) configFingerprint() string {
 	global := a.cfg.Global
-	global.ProxyMode = "" // not a setting of the core
+	global.ProxyMode = ""     // system proxy mode
+	global.AutoStart = false  // whether the core starts with the app
+	global.EnvProxy = false   // proxy environment variables
+	global.SoftRender = false // software rasterizer, read once at startup
+
+	var server *serverConfig
+	if s := a.activeServer(); s != nil {
+		cp := *s
+		cp.ID = ""             // stable identity, not a core setting
+		cp.SubscriptionID = "" // list grouping only
+		cp.Name = ""           // display label only
+		server = &cp
+	}
 	data, _ := json.Marshal(struct {
 		Global globalConfig
 		Server *serverConfig
-	}{global, a.activeServer()})
+	}{global, server})
 	return string(data)
 }
 

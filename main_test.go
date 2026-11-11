@@ -913,3 +913,56 @@ func TestSaveFailedAlert(t *testing.T) {
 		t.Errorf("the warning should be gone: kind=%v message=%q", a.alertKind, a.saveFailed)
 	}
 }
+
+// Only settings the core actually runs with may restart it. Changing a
+// UI- or system-level setting must leave the fingerprint alone.
+func TestConfigFingerprintIgnoresNonCoreSettings(t *testing.T) {
+	base := (&app{cfg: defaultAppConfig()}).configFingerprint()
+
+	changes := []struct {
+		name  string
+		apply func(*app)
+	}{
+		{"proxy mode", func(a *app) { a.cfg.Global.ProxyMode = "pac" }},
+		{"auto start", func(a *app) { a.cfg.Global.AutoStart = !a.cfg.Global.AutoStart }},
+		{"env proxy", func(a *app) { a.cfg.Global.EnvProxy = !a.cfg.Global.EnvProxy }},
+		{"soft render", func(a *app) { a.cfg.Global.SoftRender = !a.cfg.Global.SoftRender }},
+		{"server name", func(a *app) { a.cfg.Servers[0].Name = "改名" }},
+		{"subscription id", func(a *app) { a.cfg.Servers[0].SubscriptionID = "sub-a" }},
+		{"server id", func(a *app) {
+			a.cfg.Servers[0].ID = "new-id"
+			a.cfg.ActiveID = "new-id"
+		}},
+	}
+	for _, tc := range changes {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &app{cfg: defaultAppConfig()}
+			tc.apply(a)
+			if got := a.configFingerprint(); got != base {
+				t.Errorf("%s changed the fingerprint", tc.name)
+			}
+		})
+	}
+
+	// A setting the core consumes still has to change the fingerprint.
+	a := &app{cfg: defaultAppConfig()}
+	a.cfg.Global.ListenPort = "10809"
+	if got := a.configFingerprint(); got == base {
+		t.Error("changing the listen port did not change the fingerprint")
+	}
+}
+
+// Switching between two identically configured servers needs no restart.
+func TestConfigFingerprintIgnoresSameServerSwitch(t *testing.T) {
+	a := &app{cfg: defaultAppConfig()}
+	cp := *a.cfg.Servers[0]
+	cp.ID = "copy"
+	cp.Name = "副本"
+	a.cfg.Servers = append(a.cfg.Servers, cp)
+	base := a.configFingerprint()
+
+	a.cfg.ActiveID = "copy"
+	if got := a.configFingerprint(); got != base {
+		t.Error("switching to an identically configured server changed the fingerprint")
+	}
+}
