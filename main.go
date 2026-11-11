@@ -745,6 +745,9 @@ func (a *app) serverListTab(c *ui.Context) {
 			if ui.Button(c.Key("srvdup"), "复制").Clicked() {
 				a.duplicateSelected()
 			}
+			if ui.Button(c.Key("srvimport"), "导入").Clicked() && a.win != nil {
+				a.importFromClipboard()
+			}
 			if ui.Button(c.Key("srvdelsel"), "删除").Clicked() {
 				a.deleteSelected()
 			}
@@ -832,6 +835,9 @@ func (a *app) serverListTab(c *ui.Context) {
 					a.setActive(s.ID)
 				}
 				m.Separator()
+				if m.Item("复制为 URL").Chosen() && a.win != nil {
+					a.copySelectedURLs(s.ID)
+				}
 				if m.Item("测试").Chosen() {
 					a.runTestsFor(a.testTargetsFor(s.ID))
 				}

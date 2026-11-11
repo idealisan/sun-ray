@@ -201,6 +201,11 @@ git push origin v0.1.0
 ### 服务器列表与订阅
 
 - 服务器管理：新增、编辑、复制、删除，支持多选批量操作与列表排序
+- 分享链接导入 / 导出：
+  - 右键菜单「复制为 URL」把节点导出为分享链接；多选时（且右键行在选中集内）一次导出整个选中集，每行一条
+  - 工具栏「导入」一键读取剪贴板，支持明文分享链接（单行 / 多行）和整段 Base64 编码的订阅内容；每个节点作为未分类的新节点追加，重复的也直接追加
+  - 有社区标准的协议（VLESS / VMess / Trojan / Shadowsocks / Hysteria2 / Socks / HTTP）按通行格式导出，可直接粘到 v2rayN、sing-box、Clash 等客户端；没有标准链接的协议（WireGuard / Masque / Freedom / Blackhole / DNS / Loopback）用 `sunray://` + Base64URL(JSON) 私有格式，保证在 Sun Ray 内复制粘贴不丢字段
+  - 注意：分享链接和 `sunray://` 里都含明文凭据（UUID / 密码 / 私钥），Base64 只是编码不是加密，转发前请当成密码对待
 - 分组筛选：按订阅分组或未分组过滤，工具栏显示计数
 - 「设为当前」「编辑」作用于光标所在行；批量操作与测速跟随选中行 ∩ 当前筛选，永远与列表 UI 一致
 - 订阅管理：新增、编辑、复制、删除和批量删除；从订阅 URL 拉取 Base64 或明文节点链接（VLESS / VMess / Trojan / Shadowsocks / Hysteria2），更新时保留同名节点的测量结果

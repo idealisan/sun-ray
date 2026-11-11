@@ -254,6 +254,8 @@ func parseShareLink(line string) (serverConfig, error) {
 		return parseSocksHTTP(line, "socks")
 	case strings.HasPrefix(strings.ToLower(line), "http://"):
 		return parseSocksHTTP(line, "http")
+	case strings.HasPrefix(strings.ToLower(line), "sunray://"):
+		return parseSunrayLink(line)
 	default:
 		return serverConfig{}, errors.New("不支持的节点类型")
 	}
