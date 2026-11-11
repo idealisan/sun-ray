@@ -955,7 +955,7 @@ func TestConfigFingerprintIgnoresNonCoreSettings(t *testing.T) {
 // Switching between two identically configured servers needs no restart.
 func TestConfigFingerprintIgnoresSameServerSwitch(t *testing.T) {
 	a := &app{cfg: defaultAppConfig()}
-	cp := *a.cfg.Servers[0]
+	cp := a.cfg.Servers[0]
 	cp.ID = "copy"
 	cp.Name = "副本"
 	a.cfg.Servers = append(a.cfg.Servers, cp)
