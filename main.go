@@ -805,28 +805,28 @@ func (a *app) serverListTab(c *ui.Context) {
 					st := a.testStateOf(s.ID)
 					switch {
 					case st != nil && st.running:
-						ui.Text(c, "测试中…")
+						ui.Text(c, "测试中…").TextAlign(ui.End)
 					case st != nil && st.failed:
-						ui.Text(c, "失败")
+						ui.Text(c, "失败").TextAlign(ui.End)
 					default:
 						if r, ok := a.cfg.Results[s.ID]; ok {
-							ui.Text(c, formatLatency(time.Duration(r.LatencyMs)*time.Millisecond))
+							ui.Text(c, formatLatency(time.Duration(r.LatencyMs)*time.Millisecond)).TextAlign(ui.End)
 						} else {
-							ui.Text(c, "-")
+							ui.Text(c, "-").TextAlign(ui.End)
 						}
 					}
 				case 6:
 					st := a.testStateOf(s.ID)
 					switch {
 					case st != nil && st.running:
-						ui.Text(c, "测试中…")
+						ui.Text(c, "测试中…").TextAlign(ui.End)
 					case st != nil && st.failed:
-						ui.Text(c, "-")
+						ui.Text(c, "-").TextAlign(ui.End)
 					default:
 						if r, ok := a.cfg.Results[s.ID]; ok && r.SpeedBps > 0 {
-							ui.Text(c, "↓ "+formatSpeed(r.SpeedBps))
+							ui.Text(c, "↓ "+formatSpeed(r.SpeedBps)).TextAlign(ui.End)
 						} else {
-							ui.Text(c, "-")
+							ui.Text(c, "-").TextAlign(ui.End)
 						}
 					}
 				}
