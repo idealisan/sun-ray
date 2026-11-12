@@ -234,7 +234,7 @@ git push origin v0.1.0
 
 **全局只允许运行一个 Sun Ray**：GUI、无界面版、打包的 `.app` 和开发时的 `go run .` 共用同一把锁，因为读写同一份 `~/sunray.json`、抢同一批端口，两个实例会互相覆盖状态。
 
-锁是应用数据目录下的 `sun-ray/instance.lock`（macOS：`~/Library/Application Support/`，Linux：`$XDG_CONFIG_HOME`，Windows：`%AppData%`），不是一个日志文件。macOS / Linux 用 `flock`，Windows 用 `LockFileEx`，进程崩溃或退出都由系统自动释放，不会留下需要手动清理的锁。
+锁是系统临时目录里的 `sunray-<用户 ID>.lock`——锁只在实例运行时有意义，所以不放到任何持久化的位置，不留给用户去手动清理。macOS / Linux 用 `flock`，Windows 用 `LockFileEx`，进程崩溃或退出都由系统自动释放。
 
 锁单独成文件而不是锁配置文件本身，是因为保存配置采用"临时文件 + rename"的原子替换：rename 会换掉 inode，锁就落在已被移走的旧文件上，第二个实例可以立刻锁住新文件，锁形同虚设。
 

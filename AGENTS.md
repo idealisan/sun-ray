@@ -43,7 +43,7 @@
 
 ## 单实例
 
-- `~/Library/Application Support/sun-ray/instance.lock` 是单实例锁，不是日志文件。位于应用数据目录，不放家目录根下。
+- 单实例锁放在系统临时目录（`os.TempDir()/sunray-<uid>.lock`），不放到家目录或应用数据目录：锁只在运行时有意义，不该留下需要用户手动清理的文件。
 - 锁文件必须独立于配置文件：保存是 `tmp + rename`，会换 inode，锁在配置本身会失效。
 - 释放靠进程退出（`flock` / `LockFileEx`），不需要也不应该手动删锁文件。
 

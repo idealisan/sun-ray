@@ -11,6 +11,10 @@ import (
 
 var procLockFileEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("LockFileEx")
 
+// instanceLockFileName needs no user id: Windows gives each account its own
+// temporary directory.
+func instanceLockFileName() string { return "sunray.lock" }
+
 // lockInstanceFile takes an exclusive, non-blocking byte-range lock. Like
 // flock, Windows releases it when the process exits.
 func lockInstanceFile(f *os.File) error {
