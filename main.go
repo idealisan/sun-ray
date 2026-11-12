@@ -787,7 +787,7 @@ func (a *app) serverListTab(c *ui.Context) {
 		var deleteIDs []string
 		tbl := ui.Table(c, &a.list, cols, len(a.serverRows), func(row, col int) {
 			s := &a.cfg.Servers[a.serverRows[row]]
-			cell := ui.Box(c).FillWidth().Children(func() {
+			cell := ui.Box(c).FillWidth().AlignItems(cols[col].Align).Children(func() {
 				switch col {
 				case 0:
 					if s.ID == a.cfg.ActiveID {
@@ -991,7 +991,7 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 		var deleteIDs []string
 		tbl := ui.Table(c, &a.subList, cols, len(a.cfg.Subscriptions), func(row, col int) {
 			s := &a.cfg.Subscriptions[row]
-			cell := ui.Box(c).FillWidth().Children(func() {
+			cell := ui.Box(c).FillWidth().AlignItems(cols[col].Align).Children(func() {
 				switch col {
 				case 0:
 					ui.Text(c, s.displayName()).SingleLine()
@@ -1826,6 +1826,24 @@ func main() {
 		return
 	}
 
+	// Only one copy may run: the GUI, the headless build, a development
+	// "go run" and the packaged app all read and write the same
+	// ~/sunray.json and listen on the same ports, so two of them would
+	// overwrite each other. Set the name first: mygo's forwarding socket
+	// is keyed by it.
+	mygo.App.SetName("Sun Ray")
+	if !acquireInstanceLock() {
+		// Another instance is running. Hand it our command line (it shows
+		// its window in response) and leave before touching the config.
+		mygo.App.RequestSingleInstanceLock()
+		return
+	}
+	// Own mygo's socket too, so a later launch can ask us to show the
+	// window. Our fixed lock above is the real arbiter: this one is only
+	// the notification channel, and its key differs between a packaged
+	// app and a development build.
+	mygo.App.RequestSingleInstanceLock()
+
 	// Let development and debugging runs use a private config file instead
 	// of the user's ~/sunray.json.
 	if path := configArg(os.Args[1:]); path != "" {
@@ -1870,7 +1888,13 @@ func main() {
 	a.saver.remember(a.cfg)
 	a.lastConfig = a.configFingerprint()
 	mygo.App.SetLocale("zh-Hans")
-	mygo.App.SetName("Sun Ray")
+	mygo.App.OnSecondInstance(func([]string, string) {
+		// A second launch was refused by the fixed lock; it forwarded its
+		// arguments here. Bring the running window back instead.
+		if a.win != nil {
+			a.win.Update(func() { a.showMain() })
+		}
+	})
 	mygo.App.OnBeforeQuit(a.onQuitRequested)
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		a.saver.maybeSave(a.cfg, true)

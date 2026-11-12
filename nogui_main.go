@@ -48,6 +48,14 @@ func main() {
 		return
 	}
 
+	// Share the single-instance lock with the GUI: both use the same
+	// config file and port. One-shot commands skip it, so integration
+	// tests (-test-mode) can run their own instances, and -test/-version
+	// never linger.
+	if !*test && !*testMode && !acquireInstanceLock() {
+		log.Fatal("已有 Sun Ray 实例在运行")
+	}
+
 	path := *configFile
 	if path == "" {
 		path = configPath()
