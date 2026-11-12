@@ -65,3 +65,32 @@ func TestInstanceLockPathOverride(t *testing.T) {
 		t.Fatalf("override ignored: %q", got)
 	}
 }
+
+// The lock lives in the app data directory, not at the top of the user's
+// home, and its directory is created on demand.
+func TestInstanceLockPathIsInAppData(t *testing.T) {
+	t.Setenv("SUNRAY_INSTANCE_LOCK", "")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("no user config dir: %v", err)
+	}
+	want := filepath.Join(dir, "sun-ray", "instance.lock")
+	if got := instanceLockPath(); got != want {
+		t.Fatalf("instanceLockPath = %q, want %q", got, want)
+	}
+}
+
+// acquireInstanceLock creates the lock directory when it is missing.
+func TestAcquireLockCreatesDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "deeper")
+	path := filepath.Join(dir, "instance.lock")
+	t.Setenv("SUNRAY_INSTANCE_LOCK", path)
+	if !acquireInstanceLock() {
+		t.Fatal("the lock should be taken in a fresh directory")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the lock file was not created: %v", err)
+	}
+	_ = instanceLockFile.Close()
+	instanceLockFile = nil
+}

@@ -32,6 +32,23 @@ func configPath() string {
 	return filepath.Join(home, "sunray.json")
 }
 
+// runningTests reports whether this process is a test binary: go test names
+// the executable it builds *.test.
+func runningTests() bool {
+	return strings.HasSuffix(os.Args[0], ".test")
+}
+
+// mustNotWriteUserConfig panics when a test would write the config path the
+// user really uses. Tests must point configFileOverride at a temporary file
+// (TestMain does it for every test): a test that edits the config would
+// otherwise replace ~/sunray.json with its fixture.
+func mustNotWriteUserConfig() {
+	if !runningTests() || configFileOverride != "" {
+		return
+	}
+	panic("refusing to write the user's config in a test: set configFileOverride to a temporary path (see TestMain)")
+}
+
 // loadConfig reads the saved config. A missing file is not an error: the app
 // starts with the defaults. A file that exists but cannot be read or parsed
 // is an error, and the caller must not write over it.
@@ -105,6 +122,7 @@ func saveConfig(cfg appConfig) error {
 	if err != nil {
 		return err
 	}
+	mustNotWriteUserConfig()
 	path := configPath()
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {

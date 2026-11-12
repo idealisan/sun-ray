@@ -15,17 +15,23 @@ import (
 	"path/filepath"
 )
 
-// instanceLockPath is fixed for the user. Tests point SUNRAY_INSTANCE_LOCK
+// instanceLockPath names the lock in the user's application data
+// directory, not at the top of their home. Tests point SUNRAY_INSTANCE_LOCK
 // at a private path so they never contend with the running app.
+//
+// The lock is not the config file itself: saves replace it by rename, which
+// swaps the inode, so a lock held on it would be on a file no longer at that
+// path and a second instance could lock the new one. A file of its own never
+// replaced keeps the lock meaningful for the life of the process.
 func instanceLockPath() string {
 	if p := os.Getenv("SUNRAY_INSTANCE_LOCK"); p != "" {
 		return p
 	}
-	home, err := os.UserHomeDir()
+	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "sunray.lock"
 	}
-	return filepath.Join(home, "sunray.lock")
+	return filepath.Join(dir, "sun-ray", "instance.lock")
 }
 
 // instanceLockFile stays open for the life of the process: closing it, or
@@ -37,7 +43,11 @@ var instanceLockFile *os.File
 // at all (unwritable directory), it lets the app start rather than refusing
 // to run.
 func acquireInstanceLock() bool {
-	f, err := os.OpenFile(instanceLockPath(), os.O_CREATE|os.O_RDWR, 0o600)
+	path := instanceLockPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return true
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return true
 	}

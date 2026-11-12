@@ -966,3 +966,17 @@ func TestConfigFingerprintIgnoresSameServerSwitch(t *testing.T) {
 		t.Error("switching to an identically configured server changed the fingerprint")
 	}
 }
+
+// The guard in saveConfig must stop a test that forgets to isolate the
+// config path, so it can never replace the user's ~/sunray.json.
+func TestSaveRefusesUserConfigInTests(t *testing.T) {
+	old := configFileOverride
+	configFileOverride = ""
+	defer func() { configFileOverride = old }()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("saveConfig should refuse to write the user's config in a test")
+		}
+	}()
+	_ = saveConfig(defaultAppConfig())
+}
