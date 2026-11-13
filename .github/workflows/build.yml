@@ -42,6 +42,9 @@ jobs:
       - name: Apply the quit-reason patch to mygo
         run: git -C mygo apply --whitespace=nowarn ../patches/mygo-quit-reason.patch
 
+      - name: Apply the network-event patch to mygo
+        run: git -C mygo apply --whitespace=nowarn ../patches/mygo-network-path-events.patch
+
       - name: Check the release tag against the manifest
         # The manifest names the macOS disk image, so a tag that disagrees
         # with it ships a release under the wrong name. Weekly geo builds
@@ -209,6 +212,9 @@ jobs:
 
       - name: Apply the quit-reason patch to mygo
         run: git -C mygo apply --whitespace=nowarn ../patches/mygo-quit-reason.patch
+
+      - name: Apply the network-event patch to mygo
+        run: git -C mygo apply --whitespace=nowarn ../patches/mygo-network-path-events.patch
 
       - name: Build the app and the probes
         run: bash scripts/size-report.sh

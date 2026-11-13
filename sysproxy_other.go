@@ -11,6 +11,12 @@ import (
 	"strings"
 )
 
+// systemProxyIsManual and systemProxyIsPAC are only checked on macOS for
+// now; elsewhere the settings the app applied are trusted until the next
+// change.
+func systemProxyIsManual(host, port string) bool { return true }
+func systemProxyIsPAC(url string) bool           { return true }
+
 func gnomeIgnoreHosts() string {
 	hosts := append([]string{}, localBypassDomains...)
 	hosts = append(hosts, localBypassCIDRs...)

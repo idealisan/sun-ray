@@ -23,11 +23,13 @@ type pacServer struct {
 	server   *http.Server
 	url      string
 	content  atomic.Value // string
+	stopping atomic.Bool  // stop was called: a Serve error is expected
 }
 
 // startPACServer starts the PAC server for the given local proxy
-// address, for example 127.0.0.1:10808.
-func startPACServer(proxyAddr string) (*pacServer, error) {
+// address, for example 127.0.0.1:10808. onError hears about a server that
+// stops by itself, so the app can restart it and reapply the proxy.
+func startPACServer(proxyAddr string, onError func(error)) (*pacServer, error) {
 	var listener net.Listener
 	var err error
 	for _, port := range pacPorts {
@@ -56,7 +58,11 @@ func startPACServer(proxyAddr string) (*pacServer, error) {
 		http.Redirect(w, r, "/pac", http.StatusFound)
 	})
 	p.server = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	go p.server.Serve(listener)
+	go func() {
+		if err := p.server.Serve(listener); err != nil && !p.stopping.Load() && onError != nil {
+			onError(err)
+		}
+	}()
 	addr := listener.Addr().(*net.TCPAddr)
 	p.url = fmt.Sprintf("http://127.0.0.1:%d/pac", addr.Port)
 	return p, nil
@@ -76,6 +82,7 @@ func (p *pacServer) stop() {
 	if p == nil {
 		return
 	}
+	p.stopping.Store(true)
 	if p.server != nil {
 		_ = p.server.Close()
 	}

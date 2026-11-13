@@ -61,6 +61,56 @@ func darwinNetworkServices() []string {
 	return services
 }
 
+// systemProxyIsManual reports whether the system applies the local proxy
+// the settings ask for.
+func systemProxyIsManual(host, port string) bool {
+	values := scutilProxy()
+	return values["HTTPEnable"] == "1" && values["HTTPProxy"] == host && values["HTTPPort"] == port &&
+		values["HTTPSEnable"] == "1" && values["HTTPSProxy"] == host && values["HTTPSPort"] == port
+}
+
+// systemProxyIsPAC reports whether the system applies the PAC URL the app
+// serves.
+func systemProxyIsPAC(url string) bool {
+	values := scutilProxy()
+	if values["ProxyAutoConfigEnable"] != "1" {
+		return false
+	}
+	return samePACURL(values["ProxyAutoConfigURLString"], url)
+}
+
+// samePACURL compares two PAC URLs without their query, which carries a
+// token that changes with every application.
+func samePACURL(a, b string) bool {
+	if i := strings.IndexByte(a, '?'); i >= 0 {
+		a = a[:i]
+	}
+	if i := strings.IndexByte(b, '?'); i >= 0 {
+		b = b[:i]
+	}
+	return a != "" && a == b
+}
+
+// scutilProxy reads the proxy the system applies to the current network.
+func scutilProxy() map[string]string {
+	values := map[string]string{}
+	out, err := exec.Command("scutil", "--proxy").Output()
+	if err != nil {
+		return values
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if key != "" {
+			values[key] = value
+		}
+	}
+	return values
+}
+
 // runQuiet runs a command and ignores what it says.
 func runQuiet(name string, args ...string) {
 	_ = exec.Command(name, args...).Run()

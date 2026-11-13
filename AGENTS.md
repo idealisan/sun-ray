@@ -62,11 +62,13 @@ mygo 的改动在本仓库里以补丁维护（上游 `egoist/mygo` 没有推送
 
 - `patches/mygo-force-warp.patch`
 - `patches/mygo-quit-reason.patch`（应用代码依赖它，不应用就编译不过）
+- `patches/mygo-network-path-events.patch`（同上，应用代码依赖它）
 
 本地从干净的子模块构建前也要应用：
 
 ```bash
 git -C mygo apply --whitespace=nowarn ../patches/mygo-quit-reason.patch
+git -C mygo apply --whitespace=nowarn ../patches/mygo-network-path-events.patch
 ```
 
 ## 提交与发布

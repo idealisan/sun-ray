@@ -11,6 +11,12 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// systemProxyIsManual and systemProxyIsPAC are only checked on macOS for
+// now; elsewhere the settings the app applied are trusted until the next
+// change.
+func systemProxyIsManual(host, port string) bool { return true }
+func systemProxyIsPAC(url string) bool           { return true }
+
 const internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 
 // windowsProxyBypass expands the private ranges into the wildcard patterns

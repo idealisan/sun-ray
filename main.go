@@ -2229,6 +2229,17 @@ func main() {
 		if !hasVisibleWindows {
 			a.showMain()
 		}
+		// Coming back to the app is when a proxy another program took
+		// away is noticed, without a timer looking for it.
+		a.ensureSystemProxy("回到应用")
+	})
+	mygo.Network.OnPathChanged(func() {
+		// A new adapter or a changed route: the proxy may be missing on
+		// the service that just became active.
+		a.ensureSystemProxy("网络配置变化")
+	})
+	mygo.Power.OnResume(func() {
+		a.ensureSystemProxy("系统唤醒")
 	})
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
