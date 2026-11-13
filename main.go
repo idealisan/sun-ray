@@ -670,7 +670,7 @@ func (a *app) globalTab(c *ui.Context) {
 	// One scrollbar for the whole page, the two columns included: the TUN
 	// settings below can make it taller than the window. The right padding
 	// keeps the dropdowns out from under the bar.
-	ui.Scroll(c).Grow(1).Padding(0, scrollGutter(t), 0, 0).Children(func() {
+	ui.Scroll(c).Grow(1).Padding(0, scrollGutter(t), 8, 4).Children(func() {
 		ui.Row(c).Grow(1).Gap(24).AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 				ui.Text(c, "入站（本机代理）").Bold()
