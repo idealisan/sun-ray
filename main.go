@@ -650,7 +650,7 @@ func (a *app) globalTab(c *ui.Context) {
 				ui.Text(c, "TUN 模式").Bold()
 				ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，启动时请求管理员权限）")
 				if g.TunEnabled {
-					ui.Text(c, "建议保持「解析列表外的域名」关闭：本地 DNS 可能被污染，按解析结果分流会误判；DNS 干净的话可以打开。").TextColor(t.TextMuted)
+					ui.Text(c, "建议关闭「解析列表外的域名，并根据 IP 进一步路由」这个域名解析策略：本地 DNS 可能被污染，按解析结果分流会误判；DNS 干净的话可以打开。").TextColor(t.TextMuted)
 					ui.Field(c, "接口名", func() {
 						ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
 					})

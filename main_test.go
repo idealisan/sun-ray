@@ -513,7 +513,7 @@ func TestGlobalTabTunDomainStrategyNote(t *testing.T) {
 	a.cfg.Global.TunEnabled = true
 	a.saver.remember(a.cfg)
 	tt := ui.NewTester(a.view, 880, 620)
-	if !tt.HasText("建议保持「解析列表外的域名」关闭") {
+	if !tt.HasText("建议关闭「解析列表外的域名") {
 		t.Fatal("the TUN settings do not mention the recommended domain strategy")
 	}
 }
