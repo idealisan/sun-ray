@@ -2,7 +2,7 @@
   "name": "Sun Ray",
   "slug": "sun-ray",
   "identifier": "com.idealisan.sunray",
-  "version": "0.20.7",
+  "version": "0.20.8",
   "copyright": "© 2026 idealisan",
   "icon": "assets/icon.png",
   "out": "dist",
