@@ -785,6 +785,22 @@ func (a *app) serverListTab(c *ui.Context) {
 		}
 		dbl := -1
 		var deleteIDs []string
+		a.list.CellMenu = func(m *ui.Menu, row, _ int) {
+			s := &a.cfg.Servers[a.serverRows[row]]
+			if m.Item("设为当前使用").Chosen() {
+				a.setActive(s.ID)
+			}
+			m.Separator()
+			if m.Item("复制为 URL").Chosen() && a.win != nil {
+				a.copySelectedURLs(s.ID)
+			}
+			if m.Item("测试").Chosen() {
+				a.runTestsFor(a.testTargetsFor(s.ID))
+			}
+			if m.Item("删除").Chosen() {
+				deleteIDs = a.deleteTargets(s.ID)
+			}
+		}
 		tbl := ui.Table(c, &a.list, cols, len(a.serverRows), func(row, col int) {
 			s := &a.cfg.Servers[a.serverRows[row]]
 			cell := ui.Box(c).FillWidth().AlignItems(cols[col].Align).Children(func() {
@@ -829,23 +845,6 @@ func (a *app) serverListTab(c *ui.Context) {
 							ui.Text(c, "-").TextAlign(ui.End)
 						}
 					}
-				}
-			})
-			cell = cell.ContextMenu(func(m *ui.Menu) {
-				if m.Item("设为当前使用").Chosen() {
-					a.setActive(s.ID)
-				}
-				m.Separator()
-				if m.Item("复制为 URL").Chosen() && a.win != nil {
-					a.copySelectedURLs(s.ID)
-				}
-				if m.Item("测试").Chosen() {
-					a.runTestsFor(a.testTargetsFor(s.ID))
-				}
-				if m.Item("删除").Chosen() {
-					// Removing rows while the table builds them would index
-					// past the shortened list; do it after this build.
-					deleteIDs = a.deleteTargets(s.ID)
 				}
 			})
 			if cell.RowDoubleClicked() {
@@ -989,6 +988,22 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 		dbl := -1
 		var duplicateID string
 		var deleteIDs []string
+		a.subList.CellMenu = func(m *ui.Menu, row, _ int) {
+			s := &a.cfg.Subscriptions[row]
+			if m.Item("编辑").Chosen() {
+				a.openSubscriptionEditor(s.ID)
+			}
+			if m.Item("复制").Chosen() {
+				duplicateID = s.ID
+			}
+			if m.Item("更新").Chosen() {
+				a.updateSubscriptions([]string{s.ID})
+			}
+			m.Separator()
+			if m.Item("删除").Chosen() {
+				deleteIDs = a.subscriptionDeleteTargets(s.ID)
+			}
+		}
 		tbl := ui.Table(c, &a.subList, cols, len(a.cfg.Subscriptions), func(row, col int) {
 			s := &a.cfg.Subscriptions[row]
 			cell := ui.Box(c).FillWidth().AlignItems(cols[col].Align).Children(func() {
@@ -1010,23 +1025,6 @@ func (a *app) subscriptionListTab(c *ui.Context) {
 					}
 				case 3:
 					ui.Text(c, formatSubscriptionTime(s.UpdatedAt))
-				}
-			})
-			cell = cell.ContextMenu(func(m *ui.Menu) {
-				if m.Item("编辑").Chosen() {
-					a.openSubscriptionEditor(s.ID)
-				}
-				if m.Item("复制").Chosen() {
-					duplicateID = s.ID
-				}
-				if m.Item("更新").Chosen() {
-					a.updateSubscriptions([]string{s.ID})
-				}
-				m.Separator()
-				if m.Item("删除").Chosen() {
-					// Removing rows while the table builds them would index
-					// past the shortened list; do it after this build.
-					deleteIDs = a.subscriptionDeleteTargets(s.ID)
 				}
 			})
 			if cell.RowDoubleClicked() {
