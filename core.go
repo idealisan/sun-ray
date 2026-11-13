@@ -48,6 +48,10 @@ type globalConfig struct {
 	TunMTU         float64 `json:"tunMtu"`     // the interface MTU, default 1500
 	TunGateway     string  `json:"tunGateway"` // the interface address
 
+	// Policies are the user's own routing rules, matched in order before
+	// any preset below.
+	Policies []policyConfig `json:"policies,omitempty"`
+
 	// Runtime-only TUN helper state. The privileged helper owns the TUN
 	// interface, so the in-process core must keep its own connections out
 	// of it. Neither field is persisted or part of the restart fingerprint.
@@ -115,6 +119,14 @@ type appConfig struct {
 	Subscriptions []subscriptionConfig    `json:"subscriptions,omitempty"`
 	ActiveID      string                  `json:"activeId"`
 	Results       map[string]serverResult `json:"results,omitempty"`
+}
+
+// policyConfig is one of the user's own routing rules, matched before
+// every preset.
+type policyConfig struct {
+	Type   string `json:"type"`   // domain, full or ip
+	Value  string `json:"value"`  // the domain or address
+	Action string `json:"action"` // direct, proxy or block
 }
 
 // serverResult is a stored measurement of one server, kept so the list
@@ -293,23 +305,39 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 	// Simple routing: private ranges and local names always go direct;
 	// presets add more. Ranges are spelled out so no geoip.dat asset is
 	// needed beyond the embedded CN list.
-	rules := []any{
-		map[string]any{"type": "field", "ip": privateSpecialCIDRs, "outboundTag": "direct"},
-		map[string]any{"type": "field", "domain": localDomainRules, "outboundTag": "direct"},
-	}
-	outbounds := []any{proxy, direct}
+	//
+	// The user's own policies come first, so they can override every preset
+	// below, but after the loopback and DNS rules a running TUN cannot do
+	// without.
+	rules := []any{}
 	if helper {
 		// Loopback must not go through the interface-bound direct
 		// outbound, and DNS must stay direct or it would recurse through
 		// the proxy while resolving the proxy server itself.
-		rules = append([]any{
+		rules = append(rules,
 			map[string]any{"type": "field", "ip": []string{"127.0.0.0/8", "::1/128"}, "outboundTag": "direct-lo"},
 			map[string]any{"type": "field", "port": "53", "network": "tcp,udp", "outboundTag": "direct"},
-		}, rules...)
+		)
+	}
+	for i, p := range g.Policies {
+		p, err := normalizePolicy(p)
+		if err != nil {
+			return nil, fmt.Errorf("策略 #%d: %v", i+1, err)
+		}
+		rules = append(rules, policyRule(p))
+	}
+	rules = append(rules,
+		map[string]any{"type": "field", "ip": privateSpecialCIDRs, "outboundTag": "direct"},
+		map[string]any{"type": "field", "domain": localDomainRules, "outboundTag": "direct"},
+	)
+	outbounds := []any{proxy, direct}
+	if helper {
 		outbounds = append(outbounds, map[string]any{"protocol": "freedom", "tag": "direct-lo"})
 	}
 	if g.RouteAds {
 		rules = append(rules, map[string]any{"type": "field", "domain": []string{"geosite:category-ads-all"}, "outboundTag": "block"})
+	}
+	if g.RouteAds || hasBlockPolicy(g.Policies) {
 		outbounds = append(outbounds, map[string]any{"protocol": "blackhole", "tag": "block"})
 	}
 	if g.RouteCN {

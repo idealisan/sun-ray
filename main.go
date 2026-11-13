@@ -45,6 +45,7 @@ const (
 	tabGlobal = iota
 	tabServer
 	tabSubscription
+	tabPolicy
 	tabLog
 )
 
@@ -78,6 +79,17 @@ type app struct {
 	lastEnvProxy   bool                  // the env proxy setting the system has
 	lastEnvAddr    string                // the address it was set to
 	lastTrayTip    string                // the hover text the tray shows
+	policyList     ui.ListState          // the policy table
+	policySelected int                   // chosen policy row, -1 for none
+	policyEditing  int                   // policy row being edited, -1 for none
+	policyNew      bool                  // the edited row is a new one
+	policyDraft    policyConfig          // the rule as it is being edited
+	policyTypeName string                // the type Select's label
+	policyActName  string                // the action Select's label
+	policyErr      string                // why the draft cannot be saved
+	policyToolbar  ui.Handle             // where the policy toolbar is
+	policyRowFrom  ui.Handle             // first cell of the row being edited
+	policyRowTo    ui.Handle             // last cell of the row being edited
 	tunWarningText string                // why the TUN interface cannot be created
 	testing        bool                  // a measurement run is in progress
 	opMu           sync.Mutex            // serializes start/stop/restart
@@ -529,7 +541,12 @@ func (a *app) view(c *ui.Context) {
 			}
 		})
 
-		ui.Tabs(c, &a.tab, "全局", "服务器", "订阅", "日志")
+		ui.Tabs(c, &a.tab, "全局", "服务器", "订阅", "策略", "日志")
+		if a.tab != tabPolicy {
+			// Leaving the table saves the row being edited, as a click
+			// outside it does.
+			a.commitPolicyEdit()
+		}
 		switch a.tab {
 		case tabGlobal:
 			a.globalTab(c)
@@ -537,6 +554,8 @@ func (a *app) view(c *ui.Context) {
 			a.serverListTab(c)
 		case tabSubscription:
 			a.subscriptionListTab(c)
+		case tabPolicy:
+			a.policyTab(c)
 		case tabLog:
 			a.logTab(c)
 		}
@@ -558,6 +577,12 @@ func (a *app) view(c *ui.Context) {
 			a.subCursor = -1
 		}
 	}).HandleInput(func(ev ui.InputEvent) bool {
+		// A click outside the policy row being edited saves it, as leaving
+		// the page does. Clicks on its toolbar are for its buttons.
+		if a.policyEditing >= 0 && a.tab == tabPolicy && ev.Kind == ui.InputPointerDown && ev.Button == 0 &&
+			!a.pointerOverPolicyRow(c, ev.X, ev.Y) && !a.pointerOverPolicyToolbar(c, ev.X, ev.Y) {
+			a.commitPolicyEdit()
+		}
 		// A toolbar click keeps the choice so batch actions still act on it;
 		// clicking the blank part of the list or another tab clears it.
 		if ev.Kind == ui.InputPointerDown && ev.Button == 0 &&
@@ -709,6 +734,289 @@ func (a *app) globalTab(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// policyTab: the user's own routing rules, edited in place. A rule sits
+// before every preset, so it can send a domain or an address the other way.
+func (a *app) policyTab(c *ui.Context) {
+	t := c.Theme()
+	policies := a.cfg.Global.Policies
+	if a.policySelected >= len(policies) {
+		a.policySelected = len(policies) - 1
+	}
+	if a.policyEditing >= len(policies) {
+		a.policyEditing, a.policyNew, a.policyErr = -1, false, ""
+	}
+	editing := a.policyEditing >= 0
+	ui.Column(c).Grow(1).Padding(0, 4, 8).Gap(8).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Bind(&a.policyToolbar).Children(func() {
+			if ui.Button(c.Key("polnew"), "新增").Disabled(editing).Clicked() {
+				a.addPolicy()
+			}
+			if ui.Button(c.Key("poledit"), "编辑").Disabled(editing || a.policySelected < 0).Clicked() {
+				a.editPolicy(a.policySelected)
+			}
+			if ui.Button(c.Key("poldel"), "删除").Disabled(editing || a.policySelected < 0).Clicked() {
+				a.deletePolicy(a.policySelected)
+			}
+			if ui.Button(c.Key("polup"), "上移").Disabled(editing || a.policySelected <= 0).Clicked() {
+				a.movePolicy(-1)
+			}
+			if ui.Button(c.Key("poldown"), "下移").Disabled(editing || a.policySelected < 0 || a.policySelected >= len(policies)-1).Clicked() {
+				a.movePolicy(1)
+			}
+			if ui.Button(c.Key("poltest"), "测试").Clicked() {
+				// The click lands on the toolbar, where the row being
+				// edited is not saved first: do it here.
+				a.commitPolicyEdit()
+				if a.policyEditing < 0 {
+					a.openPolicyTest()
+				}
+			}
+			if editing {
+				if ui.Button(c.Key("polcancel"), "取消").Clicked() {
+					a.cancelPolicyEdit()
+				}
+				ui.Text(c, "编辑中：点击这一行以外的地方保存，Esc 取消").TextColor(t.TextMuted).Grow(1)
+			} else {
+				ui.Text(c, fmt.Sprintf("共 %d 条，从上到下第一条匹配生效", len(policies))).TextColor(t.TextMuted).Grow(1)
+			}
+		})
+
+		if len(policies) == 0 && !editing {
+			ui.Column(c).Grow(1).Padding(24, 8).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "还没有策略").Bold()
+				ui.Text(c, "给某个域名或 IP 段指定直连、代理或拦截，它们排在内置规则之前").TextColor(t.TextMuted)
+				if ui.PrimaryButton(c.Key("polnewempty"), "新增策略").Clicked() {
+					a.addPolicy()
+				}
+			})
+			return
+		}
+
+		a.policyList.Selected = &a.policySelected
+		cols := []ui.TableColumn{
+			{Title: "类型", ID: "type", Width: 150},
+			{Title: "匹配内容", ID: "value"},
+			{Title: "动作", ID: "action", Width: 120},
+		}
+		menuAction, menuRow := "", -1
+		if editing {
+			a.policyList.CellMenu = nil
+		} else {
+			a.policyList.CellMenu = func(m *ui.Menu, row, _ int) {
+				if m.Item("新建").Chosen() {
+					menuAction, menuRow = "new", row
+				}
+				if m.Item("编辑").Chosen() {
+					menuAction, menuRow = "edit", row
+				}
+				m.Separator()
+				if m.Item("删除").Chosen() {
+					menuAction, menuRow = "delete", row
+				}
+			}
+		}
+		tbl := ui.Table(c, &a.policyList, cols, len(policies), func(row, col int) {
+			a.policyCell(c, row, col)
+		}).Grow(1)
+		if tbl.Shortcut(0, ui.KeyEscape) {
+			a.cancelPolicyEdit()
+		}
+		switch menuAction {
+		case "new":
+			a.addPolicy()
+		case "edit":
+			a.editPolicy(menuRow)
+		case "delete":
+			a.deletePolicy(menuRow)
+		}
+	})
+}
+
+// policyCell draws one cell, as a widget while its row is being edited and
+// as text otherwise.
+func (a *app) policyCell(c *ui.Context, row, col int) {
+	t := c.Theme()
+	p := a.cfg.Global.Policies[row]
+	editing := row == a.policyEditing
+	cell := ui.Box(c).FillWidth().Children(func() {
+		if editing {
+			switch col {
+			case 0:
+				ui.Select(c, &a.policyTypeName, policyTypeLabels).Width(140)
+				if value := policyTypeValue(a.policyTypeName); value != a.policyDraft.Type {
+					a.policyDraft.Type = value
+					a.policyErr = ""
+				}
+			case 1:
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.TextInput(c, &a.policyDraft.Value).
+						Placeholder(policyPlaceholder(a.policyDraft.Type)).
+						AutoFocus()
+					if a.policyErr != "" {
+						ui.Text(c, a.policyErr).FontSize(11).TextColor(t.Danger)
+					}
+				})
+			case 2:
+				ui.Select(c, &a.policyActName, policyActionLabels).Width(110)
+				if value := policyActionValue(a.policyActName); value != a.policyDraft.Action {
+					a.policyDraft.Action = value
+					a.policyErr = ""
+				}
+			}
+			return
+		}
+		switch col {
+		case 0:
+			ui.Text(c, policyTypeLabel(p.Type))
+		case 1:
+			ui.Text(c, p.Value).SingleLine()
+		case 2:
+			ui.Text(c, policyActionLabel(p.Action))
+		}
+	})
+	if editing {
+		switch col {
+		case 0:
+			cell.Bind(&a.policyRowFrom)
+		case 2:
+			cell.Bind(&a.policyRowTo)
+		}
+	}
+}
+
+func policyPlaceholder(policyType string) string {
+	switch policyType {
+	case policyTypeIP:
+		return "10.0.0.0/8 或 1.2.3.4"
+	case policyTypeFull:
+		return "example.com（只匹配它自己）"
+	default:
+		return "example.com（含子域）"
+	}
+}
+
+// addPolicy appends a blank rule and edits it. The draft is in the list
+// already, so saving writes it in place.
+func (a *app) addPolicy() {
+	if a.policyEditing >= 0 {
+		a.commitPolicyEdit()
+		if a.policyEditing >= 0 {
+			return // the rule being edited cannot be saved yet
+		}
+	}
+	a.cfg.Global.Policies = append(a.cfg.Global.Policies, policyConfig{
+		Type: policyTypeDomain, Action: policyActionDirect,
+	})
+	a.policyNew = true
+	a.startPolicyEdit(len(a.cfg.Global.Policies) - 1)
+}
+
+func (a *app) editPolicy(row int) {
+	if row < 0 || row >= len(a.cfg.Global.Policies) {
+		return
+	}
+	a.policyNew = false
+	a.startPolicyEdit(row)
+}
+
+func (a *app) startPolicyEdit(row int) {
+	p := a.cfg.Global.Policies[row]
+	a.policyEditing = row
+	a.policyDraft = p
+	a.policyTypeName = policyTypeLabel(p.Type)
+	a.policyActName = policyActionLabel(p.Action)
+	a.policyErr = ""
+	a.policySelected = row
+	a.policyList.ScrollIntoView(row)
+}
+
+// commitPolicyEdit saves the rule being edited. The page's input handler
+// calls it when a click lands outside the row; the tab change and the test
+// button call it too.
+func (a *app) commitPolicyEdit() {
+	if a.policyEditing < 0 || a.policyEditing >= len(a.cfg.Global.Policies) {
+		a.policyEditing, a.policyNew, a.policyErr = -1, false, ""
+		return
+	}
+	p, err := normalizePolicy(a.policyDraft)
+	if err != nil {
+		if a.policyNew && strings.TrimSpace(a.policyDraft.Value) == "" {
+			a.cancelPolicyEdit() // an untouched new row goes away
+			return
+		}
+		a.policyErr = err.Error()
+		return
+	}
+	for i, other := range a.cfg.Global.Policies {
+		if i == a.policyEditing {
+			continue
+		}
+		if other, err := normalizePolicy(other); err == nil && other.Type == p.Type && other.Value == p.Value {
+			a.policyErr = "已经有一条相同的规则"
+			return
+		}
+	}
+	a.cfg.Global.Policies[a.policyEditing] = p
+	row := a.policyEditing
+	a.policyEditing, a.policyNew, a.policyErr = -1, false, ""
+	a.policySelected = row
+	a.saver.maybeSave(a.cfg, true)
+}
+
+// cancelPolicyEdit drops the rule being edited, taking a new one out.
+func (a *app) cancelPolicyEdit() {
+	if a.policyEditing < 0 {
+		return
+	}
+	row := a.policyEditing
+	if a.policyNew {
+		a.cfg.Global.Policies = append(a.cfg.Global.Policies[:row], a.cfg.Global.Policies[row+1:]...)
+	}
+	a.policyEditing, a.policyNew, a.policyErr = -1, false, ""
+	if row >= len(a.cfg.Global.Policies) {
+		row = len(a.cfg.Global.Policies) - 1
+	}
+	a.policySelected = row
+}
+
+func (a *app) deletePolicy(row int) {
+	if row < 0 || row >= len(a.cfg.Global.Policies) {
+		return
+	}
+	a.cfg.Global.Policies = append(a.cfg.Global.Policies[:row], a.cfg.Global.Policies[row+1:]...)
+	if a.policySelected >= len(a.cfg.Global.Policies) {
+		a.policySelected = len(a.cfg.Global.Policies) - 1
+	}
+	a.saver.maybeSave(a.cfg, true)
+}
+
+func (a *app) movePolicy(delta int) {
+	row := a.policySelected
+	to := row + delta
+	if row < 0 || row >= len(a.cfg.Global.Policies) || to < 0 || to >= len(a.cfg.Global.Policies) {
+		return
+	}
+	a.cfg.Global.Policies[row], a.cfg.Global.Policies[to] = a.cfg.Global.Policies[to], a.cfg.Global.Policies[row]
+	a.policySelected = to
+	a.saver.maybeSave(a.cfg, true)
+}
+
+// pointerOverPolicyRow reports whether the point is over the policy row
+// being edited, whose cells are where the widgets are.
+func (a *app) pointerOverPolicyRow(c *ui.Context, x, y float32) bool {
+	from := a.policyRowFrom.Bounds(c)
+	to := a.policyRowTo.Bounds(c)
+	if from.W <= 0 || to.W <= 0 {
+		return false
+	}
+	return x >= from.X && x < to.X+to.W && y >= from.Y && y < from.Y+from.H
+}
+
+func (a *app) pointerOverPolicyToolbar(c *ui.Context, x, y float32) bool {
+	r := a.policyToolbar.Bounds(c)
+	return r.W > 0 && r.H > 0 && x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
 }
 
 // tunWarning says why the TUN interface cannot be created, if that is the
@@ -1862,7 +2170,7 @@ func main() {
 	// patched mygo asks for when MYGO_WARP is set. macOS draws with Metal,
 	// which has no software fallback, so the setting does nothing there.
 	cfg, loadErr := loadConfig()
-	a := &app{cfg: cfg, cursor: -1, subCursor: -1, tests: map[string]*testState{}}
+	a := &app{cfg: cfg, cursor: -1, subCursor: -1, policySelected: -1, policyEditing: -1, tests: map[string]*testState{}}
 	if loadErr != nil {
 		// The file is there but cannot be used. Keep it as it is and ask
 		// the user what to do; until they say so, nothing may write it.
