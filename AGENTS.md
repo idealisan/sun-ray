@@ -47,6 +47,19 @@
 - 锁文件必须独立于配置文件：保存是 `tmp + rename`，会换 inode，锁在配置本身会失效。
 - 释放靠进程退出（`flock` / `LockFileEx`），不需要也不应该手动删锁文件。
 
+## 子模块补丁
+
+mygo 的改动在本仓库里以补丁维护（上游 `egoist/mygo` 没有推送权限），CI 在构建前应用它们：
+
+- `patches/mygo-force-warp.patch`
+- `patches/mygo-quit-reason.patch`（应用代码依赖它，不应用就编译不过）
+
+本地从干净的子模块构建前也要应用：
+
+```bash
+git -C mygo apply --whitespace=nowarn ../patches/mygo-quit-reason.patch
+```
+
 ## 提交与发布
 
 - 提交信息参考最近 10 条的风格（`feat:` / `fix:` / `chore:` / `docs:`），不要 `Co-authored-by` trailer。

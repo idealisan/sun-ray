@@ -62,8 +62,6 @@ type app struct {
 	win            *mygo.Window
 	tray           *mygo.Tray
 	trayToggle     *mygo.MenuItem        // start/stop entry in the tray menu
-	quitting       bool                  // a real quit is under way, so closing may proceed
-	quitRequested  bool                  // the user asked to quit for good, not to hide
 	tab            int                   // selected tab in the main window
 	saver          configSaver           // debounced persistence to ~/sunray.json
 	configBroken   string                // why the config on disk failed to load, if it did
@@ -1709,13 +1707,6 @@ func (a *app) toggleMain() {
 // bar, the way closing the window does. It is what a quit that does not
 // mean "stop the proxy" turns into.
 func (a *app) hideToTray() {
-	if a.tray == nil {
-		// Without a tray there would be no way back, so let it quit.
-		a.quitRequested = true
-		a.quitting = true
-		mygo.App.Quit()
-		return
-	}
 	if a.win != nil && !a.win.IsDestroyed() {
 		a.win.Hide()
 	}
@@ -1723,19 +1714,17 @@ func (a *app) hideToTray() {
 
 // quitForGood ends the app: the proxy stops and the tray goes away.
 func (a *app) quitForGood() {
-	a.quitRequested = true
-	a.quitting = true
 	mygo.App.Quit()
 }
 
-// onQuitRequested handles a quit the system asked for. Cmd+Q and the Dock's
-// Quit both end up here, and neither can be told apart from the other.
-// Neither means "stop the proxy", so they only put the window away and leave
-// the app running in the status bar. The tray's own Quit asks for a real
-// quit and says so.
+// onQuitRequested keeps the app in the status bar when the user quits, so
+// the proxy stays up: Cmd+Q, the Dock's Quit and AppleScript only put the
+// window away. A quit the system asks for at a logout, restart or shutdown
+// is let through, or macOS would name the app as the one that prevented it;
+// so is the tray's own Quit, which App.Quit asks for.
 func (a *app) onQuitRequested(e *mygo.QuitEvent) {
-	if a.quitRequested {
-		a.quitting = true
+	if e.Reason != mygo.QuitReasonUser || a.tray == nil {
+		// Without a tray there would be no way back, so let it quit.
 		return
 	}
 	e.PreventDefault()
@@ -1921,9 +1910,10 @@ func main() {
 		// find out which build is running.
 		a.logVersion()
 		a.win.OnClose(func(e *mygo.CloseEvent) {
-			// Closing the main window keeps the app in the tray. Without a
-			// tray there would be no way back, so let it close normally.
-			if a.quitting || a.tray == nil {
+			// Closing the main window keeps the app in the tray. A close that
+			// is part of a quit proceeds, and without a tray there would be
+			// no way back, so let it close normally too.
+			if e.Quitting || a.tray == nil {
 				return
 			}
 			e.PreventDefault()

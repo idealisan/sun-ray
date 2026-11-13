@@ -8,52 +8,34 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// A quit the system asked for (Cmd+Q, the Dock's Quit) only puts the window
-// away: the app keeps running in the status bar, so the proxy stays up.
-func TestSystemQuitKeepsRunning(t *testing.T) {
-	a := &app{cfg: defaultAppConfig(), cursor: -1}
-	a.tray = &mygo.Tray{} // a tray exists, so there is a way back
-
-	e := &mygo.QuitEvent{}
-	a.onQuitRequested(e)
-	if !e.DefaultPrevented() {
-		t.Error("the quit should have been prevented")
+// A quit the user asked for (Cmd+Q, the Dock's Quit, AppleScript) only puts
+// the window away: the app keeps running in the status bar, so the proxy
+// stays up. A logout, restart or shutdown quits for good, or macOS would
+// name the app as the one that prevented it, and so does the tray's own
+// Quit, which App.Quit asks for.
+func TestQuitRequested(t *testing.T) {
+	tests := []struct {
+		name      string
+		reason    mygo.QuitReason
+		tray      bool
+		prevented bool
+	}{
+		{"a user quit keeps the app in the status bar", mygo.QuitReasonUser, true, true},
+		{"a logout or shutdown quits for good", mygo.QuitReasonSystemPowerOff, true, false},
+		{"the tray's Quit quits for good", mygo.QuitReasonApp, true, false},
+		{"without a tray a user quit quits", mygo.QuitReasonUser, false, false},
 	}
-	if a.quitting {
-		t.Error("the app should not be quitting")
-	}
-	if a.quitRequested {
-		t.Error("this was not a real quit")
-	}
-}
-
-// The tray's own Quit ends the app for good.
-func TestRealQuitProceeds(t *testing.T) {
-	a := &app{cfg: defaultAppConfig(), cursor: -1}
-	a.tray = &mygo.Tray{}
-	a.quitRequested = true
-
-	e := &mygo.QuitEvent{}
-	a.onQuitRequested(e)
-	if e.DefaultPrevented() {
-		t.Error("a real quit should not be prevented")
-	}
-	if !a.quitting {
-		t.Error("the app should be quitting")
-	}
-}
-
-// Without a tray there would be no way back, so the window close quits.
-func TestQuitWithoutTrayQuits(t *testing.T) {
-	a := &app{cfg: defaultAppConfig(), cursor: -1}
-	a.tray = nil
-
-	e := &mygo.QuitEvent{}
-	a.onQuitRequested(e)
-	if !e.DefaultPrevented() {
-		t.Error("the quit should have been prevented")
-	}
-	if !a.quitRequested {
-		t.Error("without a tray the app should quit for good")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &app{cfg: defaultAppConfig(), cursor: -1}
+			if tt.tray {
+				a.tray = &mygo.Tray{}
+			}
+			e := &mygo.QuitEvent{Reason: tt.reason}
+			a.onQuitRequested(e)
+			if e.DefaultPrevented() != tt.prevented {
+				t.Errorf("prevented = %v, want %v", e.DefaultPrevented(), tt.prevented)
+			}
+		})
 	}
 }

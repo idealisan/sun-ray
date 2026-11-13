@@ -1,0 +1,349 @@
+diff --git a/app.go b/app.go
+index ee5c19c7..b2c8231a 100644
+--- a/app.go
++++ b/app.go
+@@ -188,7 +188,7 @@ func (a *Application) Quit() {
+ 			backend().Quit()
+ 			return
+ 		}
+-		if a.prepareQuit() {
++		if a.prepareQuit(QuitReasonApp) {
+ 			a.stopLoop()
+ 		}
+ 	})
+@@ -241,11 +241,11 @@ func (a *Application) Exit(code int) {
+ 
+ // prepareQuit runs the quit sequence on the main thread and reports whether
+ // the application may quit.
+-func (a *Application) prepareQuit() bool {
++func (a *Application) prepareQuit(reason QuitReason) bool {
+ 	if a.quitting {
+ 		return false
+ 	}
+-	before := &QuitEvent{}
++	before := &QuitEvent{Reason: reason}
+ 	fire1(&a.onBeforeQuit, before)
+ 	if before.prevented {
+ 		return false
+@@ -257,7 +257,7 @@ func (a *Application) prepareQuit() bool {
+ 			return false
+ 		}
+ 	}
+-	will := &QuitEvent{}
++	will := &QuitEvent{Reason: reason}
+ 	fire1(&a.onWillQuit, will)
+ 	if will.prevented {
+ 		a.quitting = false
+@@ -667,12 +667,12 @@ type appHandler struct{}
+ 
+ func (appHandler) Ready()    { App.handleReady() }
+ func (appHandler) Dispatch() { loop.drain() }
+-func (appHandler) QuitRequested() bool {
++func (appHandler) QuitRequested(reason platform.QuitReason) bool {
+ 	if App.stopping {
+ 		// The loop goes on although asked to stop: ask again.
+ 		return true
+ 	}
+-	if !App.prepareQuit() {
++	if !App.prepareQuit(QuitReason(reason)) {
+ 		return false
+ 	}
+ 	// The backend stops its loop itself.
+diff --git a/docs/app.md b/docs/app.md
+index 3af4cf37..44b9e565 100644
+--- a/docs/app.md
++++ b/docs/app.md
+@@ -87,6 +87,14 @@ mygo.App.OnActivate(func(hasVisibleWindows bool) {
+   then quits; `OnBeforeQuit` and `OnWillQuit` listeners can cancel it too.
+   Cmd+Q, the Quit menu item and Ctrl+C in the terminal (SIGINT and SIGTERM)
+   quit the same way; a second signal exits at once.
++- `QuitEvent.Reason` says who asked for the quit: `QuitReasonUser` for
++  Cmd+Q, the Dock's Quit, a menu item or AppleScript; `QuitReasonSystemPowerOff`
++  for a logout, restart or shutdown; `QuitReasonApp` for `App.Quit` and
++  `Relaunch`. An app that keeps running in the status bar when the user
++  quits should still let the system's quit through: refusing it makes macOS
++  name the app as the one that prevented the logout or shutdown.
++- A window closed by the quit reaches `OnClose` with `CloseEvent.Quitting`
++  set, which tells it from a click on the close button.
+ - `App.Exit(code)` exits right away, without events.
+ - `App.Relaunch()` quits, then starts the app again with the same
+   arguments, for example after a setting that needs a restart.
+diff --git a/document_test.go b/document_test.go
+index 78e70b37..54606b9d 100644
+--- a/document_test.go
++++ b/document_test.go
+@@ -493,7 +493,7 @@ func TestDocumentQuit(t *testing.T) {
+ 	d := ds.New()
+ 	d.Set("keep me")
+ 	asked := answer("Cancel")
+-	if onMainValue(fb.QuitRequested) {
++	if quitAs(platform.QuitReasonUser) {
+ 		t.Fatal("quit with an unsaved document not kept yet")
+ 	}
+ 	<-quits
+@@ -506,7 +506,7 @@ func TestDocumentQuit(t *testing.T) {
+ 	a := ask.New()
+ 	a.Set("ask")
+ 	asked = answer("Cancel")
+-	if onMainValue(fb.QuitRequested) {
++	if quitAs(platform.QuitReasonUser) {
+ 		t.Fatal("quit without asking")
+ 	}
+ 	waitFor(t, "the question", func() bool { return len(asked.all()) == 1 })
+@@ -516,7 +516,7 @@ func TestDocumentQuit(t *testing.T) {
+ 	case <-time.After(20 * time.Millisecond):
+ 	}
+ 	answer("Don’t Save")
+-	onMainValue(fb.QuitRequested)
++	quitAs(platform.QuitReasonUser)
+ 	<-quits
+ }
+ 
+diff --git a/events.go b/events.go
+index 5df78be3..737fbd9d 100644
+--- a/events.go
++++ b/events.go
+@@ -21,12 +21,33 @@ func (p *Preventable) DefaultPrevented() bool { return p.prevented }
+ type CloseEvent struct {
+ 	Preventable
+ 	Window *Window
++	// Quitting is true when the close is part of a quit, which closes every
++	// window: the user did not click the close button.
++	Quitting bool
+ }
+ 
++// QuitReason says why the application is asked to quit.
++type QuitReason int
++
++const (
++	// QuitReasonUser is a quit the user asked for: Cmd+Q, the Dock's Quit,
++	// a menu item or AppleScript.
++	QuitReasonUser QuitReason = iota
++	// QuitReasonSystemPowerOff is a logout, restart or shutdown. The app
++	// must quit: refusing would cancel the logout or the shutdown.
++	QuitReasonSystemPowerOff
++	// QuitReasonApp is a quit the application asked for itself, as
++	// App.Quit and Relaunch do.
++	QuitReasonApp
++)
++
+ // QuitEvent is passed to Application.OnBeforeQuit and OnWillQuit listeners.
+ // Preventing it cancels the quit.
+ type QuitEvent struct {
+ 	Preventable
++	// Reason says why the quit was asked for, so a listener can let a
++	// logout or shutdown through while turning Cmd+Q into something else.
++	Reason QuitReason
+ }
+ 
+ // NavigateEvent is passed to Page.OnWillNavigate listeners. Preventing it
+diff --git a/internal/darwin/app.go b/internal/darwin/app.go
+index 492a024d..a5b74a6b 100644
+--- a/internal/darwin/app.go
++++ b/internal/darwin/app.go
+@@ -265,8 +265,37 @@ const (
+ 	kAEQuitApplication = 0x71756974 // 'quit'
+ 	keyErrorNumber     = 0x6572726E // 'errn'
+ 	userCanceledErr    = -128
++
++	// kAEQuitReason is the quit event's 'why?' attribute, which the system
++	// sets at a logout, restart or shutdown and leaves out for Cmd+Q, the
++	// Dock's Quit and AppleScript.
++	kAEQuitReason         = 0x7768793F // 'why?'
++	kAELogOut             = 0x6C6F676F // 'logo'
++	kAEReallyLogOut       = 0x726C676F // 'rlgo'
++	kAERestart            = 0x72657374 // 'rest'
++	kAEShutDown           = 0x73687574 // 'shut'
++	kAEShowRestartDialog  = 0x72727374 // 'rrst'
++	kAEShowShutdownDialog = 0x7273646E // 'rsdn'
+ )
+ 
++// quitReasonFromEvent says why a quit was asked for. The system attaches
++// kAEQuitReason to the quit it sends at a logout, restart or shutdown; a
++// quit the user asked for has no reason, and Cmd+Q has no event at all.
++func quitReasonFromEvent(event id) platform.QuitReason {
++	if event == 0 {
++		return platform.QuitReasonUser
++	}
++	why := send(event, "attributeDescriptorForKeyword:", kAEQuitReason)
++	if why == 0 {
++		return platform.QuitReasonUser
++	}
++	switch sendInt(why, "enumCodeValue") {
++	case kAELogOut, kAEReallyLogOut, kAERestart, kAEShutDown, kAEShowRestartDialog, kAEShowShutdownDialog:
++		return platform.QuitReasonSystemPowerOff
++	}
++	return platform.QuitReasonUser
++}
++
+ func registerAppDelegate() {
+ 	classDef("MyGoAppDelegate", "NSObject", []string{"NSApplicationDelegate"}, []objc.MethodDef{
+ 		// The end of a PrintToPDF job (printJobs). WebKit's print operations
+@@ -303,7 +332,8 @@ func registerAppDelegate() {
+ 		// returns and deferred cleanup in main runs.
+ 		method("applicationShouldTerminate:", func(self id, _ objc.SEL, app id) uint {
+ 			b := theBackend
+-			if b.h.QuitRequested() {
++			aem := send(class("NSAppleEventManager"), "sharedAppleEventManager")
++			if b.h.QuitRequested(quitReasonFromEvent(send(aem, "currentAppleEvent"))) {
+ 				b.Quit()
+ 			}
+ 			return nsTerminateCancel
+@@ -316,7 +346,7 @@ func registerAppDelegate() {
+ 		}),
+ 		method("mygoHandleQuitEvent:withReplyEvent:", func(self id, _ objc.SEL, event, reply id) {
+ 			b := theBackend
+-			if b.h.QuitRequested() {
++			if b.h.QuitRequested(quitReasonFromEvent(event)) {
+ 				b.Quit()
+ 				return
+ 			}
+diff --git a/internal/fake/fake.go b/internal/fake/fake.go
+index 665176a1..fe8ff4fe 100644
+--- a/internal/fake/fake.go
++++ b/internal/fake/fake.go
+@@ -241,9 +241,10 @@ func (b *Backend) Wake() {
+ 	}
+ }
+ 
+-// QuitRequested simulates Cmd+Q and reports whether the app agreed.
+-func (b *Backend) QuitRequested() bool {
+-	if b.h.QuitRequested() {
++// QuitRequested simulates a quit for the given reason and reports whether
++// the app agreed.
++func (b *Backend) QuitRequested(reason platform.QuitReason) bool {
++	if b.h.QuitRequested(reason) {
+ 		b.Quit()
+ 		return true
+ 	}
+diff --git a/internal/platform/platform.go b/internal/platform/platform.go
+index a7bcb81c..00b9cbd2 100644
+--- a/internal/platform/platform.go
++++ b/internal/platform/platform.go
+@@ -168,15 +168,30 @@ type AppOptions struct {
+ 	DMABUFRenderer string
+ }
+ 
++// QuitReason says why the application is asked to quit.
++type QuitReason int
++
++const (
++	// QuitReasonUser is a quit the user asked for: Cmd+Q, the Dock's Quit,
++	// a menu item or AppleScript.
++	QuitReasonUser QuitReason = iota
++	// QuitReasonSystemPowerOff is a logout, restart or shutdown.
++	QuitReasonSystemPowerOff
++	// QuitReasonApp is a quit the application asked for itself, as App.Quit
++	// and Relaunch do.
++	QuitReasonApp
++)
++
+ // AppHandler receives application level events from the backend.
+ type AppHandler interface {
+ 	Ready()
+ 	// Dispatch drains the queue of functions scheduled for the main thread.
+ 	Dispatch()
+ 	// QuitRequested is called when the user or the OS asks the application
+-	// to quit (Cmd+Q, Dock > Quit, logout). Returning true lets the quit
+-	// proceed.
+-	QuitRequested() bool
++	// to quit. The reason says which: a quit Cmd+Q, the Dock's Quit or
++	// AppleScript asked for, a logout, restart or shutdown, or the
++	// application's own Quit. Returning true lets the quit proceed.
++	QuitRequested(reason QuitReason) bool
+ 	// Terminating is called right before the process is terminated by the
+ 	// OS (logout/shutdown); Run will not return.
+ 	Terminating()
+diff --git a/login.go b/login.go
+index c1cc529c..2eb6e563 100644
+--- a/login.go
++++ b/login.go
+@@ -92,7 +92,7 @@ func (a *Application) Relaunch() {
+ 		// open behind the one in front. It passes the right on while it
+ 		// still has it.
+ 		backend().App().AllowForeground()
+-		if a.prepareQuit() {
++		if a.prepareQuit(QuitReasonApp) {
+ 			a.stopLoop()
+ 		} else {
+ 			a.relaunch = false
+diff --git a/mygo_test.go b/mygo_test.go
+index 68282222..f14d698a 100644
+--- a/mygo_test.go
++++ b/mygo_test.go
+@@ -1765,21 +1765,32 @@ func TestNextZoom(t *testing.T) {
+ 
+ // Application.
+ 
++// quitAs asks the fake backend to quit for reason, as the backend does
++// when the user, the system or the app asks for it.
++func quitAs(reason platform.QuitReason) bool {
++	return onMainValue(func() bool { return fb.QuitRequested(reason) })
++}
++
+ func TestQuitCanBeCanceled(t *testing.T) {
+ 	w, _ := testWindow(t, WindowOptions{})
+ 	off := App.OnBeforeQuit(func(e *QuitEvent) { e.PreventDefault() })
+-	if onMainValue(fb.QuitRequested) {
++	if quitAs(platform.QuitReasonUser) {
+ 		t.Fatal("quit was not canceled by OnBeforeQuit")
+ 	}
+ 	off()
+-	offClose := w.OnClose(func(e *CloseEvent) { e.PreventDefault() })
+-	if onMainValue(fb.QuitRequested) {
++	offClose := w.OnClose(func(e *CloseEvent) {
++		if !e.Quitting {
++			t.Error("a window the quit closes should say so")
++		}
++		e.PreventDefault()
++	})
++	if quitAs(platform.QuitReasonUser) {
+ 		t.Fatal("quit was not canceled by a window")
+ 	}
+ 	offClose()
+ 	offWill := App.OnWillQuit(func(e *QuitEvent) { e.PreventDefault() })
+ 	defer offWill()
+-	if onMainValue(fb.QuitRequested) {
++	if quitAs(platform.QuitReasonUser) {
+ 		t.Fatal("quit was not canceled by OnWillQuit")
+ 	}
+ 	if !w.IsDestroyed() {
+@@ -1787,6 +1798,25 @@ func TestQuitCanBeCanceled(t *testing.T) {
+ 	}
+ }
+ 
++// The reason travels with the event, so a listener can tell a logout from
++// Cmd+Q and answer each in its own way.
++func TestQuitReasonReachesListeners(t *testing.T) {
++	for _, reason := range []platform.QuitReason{platform.QuitReasonUser, platform.QuitReasonSystemPowerOff} {
++		var got []QuitReason
++		off := App.OnBeforeQuit(func(e *QuitEvent) {
++			got = append(got, e.Reason)
++			e.PreventDefault()
++		})
++		if quitAs(reason) {
++			t.Fatalf("%v: the quit should have been canceled", reason)
++		}
++		off()
++		if len(got) != 1 || got[0] != QuitReason(reason) {
++			t.Errorf("%v: OnBeforeQuit got %v", reason, got)
++		}
++	}
++}
++
+ func TestPaths(t *testing.T) {
+ 	dir, err := App.Path(PathUserData)
+ 	if err != nil || !strings.HasSuffix(dir, "MyGoTest") {
+diff --git a/window.go b/window.go
+index bd0a1071..cba514f0 100644
+--- a/window.go
++++ b/window.go
+@@ -838,7 +838,7 @@ func (w *Window) close() bool {
+ 	if w.native == nil {
+ 		return true
+ 	}
+-	e := &CloseEvent{Window: w}
++	e := &CloseEvent{Window: w, Quitting: App.quitting}
+ 	fire1(&w.onClose, e)
+ 	if e.prevented {
+ 		return false
