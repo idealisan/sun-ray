@@ -14,5 +14,8 @@ node_modules/
 # local scratch scripts
 _*.py
 
+# 本地临时文件（AGENTS.md 要求放这里，不用系统临时目录）
+/TMP/
+
 # Python
 __pycache__/
