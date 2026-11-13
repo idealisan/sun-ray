@@ -43,10 +43,11 @@ func tunInbound(g *globalConfig) map[string]any {
 	if gateway == "" {
 		gateway = defaultTunGateway
 	}
-	routes := []string{"0.0.0.0/0"}
-	if g.TunIPv6 {
-		routes = append(routes, "::/0")
-	}
+	// Both families, always: a TUN that takes the traffic but leaves IPv6
+	// out lets every dual-stack site connect around it. macOS and browsers
+	// prefer IPv6, and a blocked site then fails in the TLS handshake
+	// instead of going through the proxy.
+	routes := []string{"0.0.0.0/0", "::/0"}
 	return map[string]any{
 		"tag": "tun-in", "protocol": "tun", "port": 0,
 		"settings": map[string]any{

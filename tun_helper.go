@@ -52,7 +52,6 @@ type tunHelperSettings struct {
 	TunName    string
 	MTU        int
 	Gateway    string
-	IPv6       bool
 	ListenPort string
 	Iface      string
 }
@@ -77,7 +76,6 @@ func tunSettingsFor(g *globalConfig, iface, currentName string) tunHelperSetting
 		TunName:    name,
 		MTU:        mtu,
 		Gateway:    gateway,
-		IPv6:       g.TunIPv6,
 		ListenPort: g.ListenPort,
 		Iface:      iface,
 	}

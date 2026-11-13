@@ -597,104 +597,107 @@ func (a *app) pointerOverToolbar(c *ui.Context, x, y float32) bool {
 func (a *app) globalTab(c *ui.Context) {
 	g := &a.cfg.Global
 	t := c.Theme()
-	ui.Row(c).Grow(1).Gap(24).AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
-			ui.Text(c, "入站（本机代理）").Bold()
-			ui.Field(c, "监听端口（SOCKS 与 HTTP 共用）", func() {
-				ui.TextInput(c, &g.ListenPort).Placeholder("10808")
+	// One scrollbar for the whole page, the two columns included: the TUN
+	// settings below can make it taller than the window.
+	ui.Scroll(c).Grow(1).Children(func() {
+		ui.Row(c).Grow(1).Gap(24).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+				ui.Text(c, "入站（本机代理）").Bold()
+				ui.Field(c, "监听端口（SOCKS 与 HTTP 共用）", func() {
+					ui.TextInput(c, &g.ListenPort).Placeholder("10808")
+				})
+				ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
+				ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
+				ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）").Disabled(runtime.GOOS != "windows")
+				if ui.Button(c.Key("copyenvcmd"), "复制环境变量命令").Clicked() && a.win != nil {
+					addr := "127.0.0.1:" + g.ListenPort
+					mygo.Clipboard.WriteText(envProxyCommands(addr))
+					a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
+				}
+				ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，Windows/Linux 有效）")
+				a.syncEnvProxy(g)
+
+				ui.Text(c, "日志").Bold()
+				renderChoice(c, "日志级别", &g.LogLevel, logLevels)
+
+				ui.Text(c, "TUN 模式").Bold()
+				ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，启动时请求管理员权限）")
+				if g.TunEnabled {
+					ui.Field(c, "接口名", func() {
+						ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
+					})
+					ui.Field(c, "MTU（默认 1500）", func() {
+						ui.TextInput(c, &a.tunMTU).Placeholder("1500")
+					})
+					if mtu, ok := parseTunMTU(a.tunMTU); ok {
+						g.TunMTU = mtu
+					}
+					ui.Field(c, "网关地址", func() {
+						ui.TextInput(c, &g.TunGateway).Placeholder(defaultTunGateway)
+					})
+					if msg := a.tunWarning(); msg != "" {
+						ui.Text(c, msg).TextColor(t.TextMuted)
+					}
+				}
 			})
-			ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
-			ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
-			ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）").Disabled(runtime.GOOS != "windows")
-			if ui.Button(c.Key("copyenvcmd"), "复制环境变量命令").Clicked() && a.win != nil {
-				addr := "127.0.0.1:" + g.ListenPort
-				mygo.Clipboard.WriteText(envProxyCommands(addr))
-				a.addLog("[sun-ray] 已把设置代理环境变量的命令复制到剪贴板")
-			}
-			ui.Checkbox(c, &g.SoftRender, "软件渲染（省内存约 25MB，Windows/Linux 有效）")
-			a.syncEnvProxy(g)
 
-			ui.Text(c, "日志").Bold()
-			renderChoice(c, "日志级别", &g.LogLevel, logLevels)
-
-			ui.Text(c, "TUN 模式").Bold()
-			ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，启动时请求管理员权限）")
-			if g.TunEnabled {
-				ui.Field(c, "接口名", func() {
-					ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
-				})
-				ui.Field(c, "MTU（默认 1500）", func() {
-					ui.TextInput(c, &a.tunMTU).Placeholder("1500")
-				})
-				if mtu, ok := parseTunMTU(a.tunMTU); ok {
-					g.TunMTU = mtu
-				}
-				ui.Field(c, "网关地址", func() {
-					ui.TextInput(c, &g.TunGateway).Placeholder(defaultTunGateway)
-				})
-				ui.Checkbox(c, &g.TunIPv6, "同时接管 IPv6")
-				if msg := a.tunWarning(); msg != "" {
-					ui.Text(c, msg).TextColor(t.TextMuted)
-				}
-			}
-		})
-
-		ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
-			if g.TunEnabled {
-				ui.Text(c, "系统代理").Bold()
-				ui.Text(c, "TUN 模式接管全部流量，不再修改系统代理").TextColor(t.TextMuted)
-				if g.ProxyMode != proxyModeOff {
-					g.ProxyMode = proxyModeOff
-					a.clearSystemProxySetting()
-				}
-			} else {
-				ui.Text(c, "系统代理").Bold()
-				ui.Field(c, "代理模式", func() {
-					ui.RadioGroup(c, func() {
-						ui.Row(c).Gap(14).Children(func() {
-							for _, mode := range proxyModeOptions {
-								ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
-							}
+			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+				if g.TunEnabled {
+					ui.Text(c, "系统代理").Bold()
+					ui.Text(c, "TUN 模式接管全部流量，不再修改系统代理").TextColor(t.TextMuted)
+					if g.ProxyMode != proxyModeOff {
+						g.ProxyMode = proxyModeOff
+						a.clearSystemProxySetting()
+					}
+				} else {
+					ui.Text(c, "系统代理").Bold()
+					ui.Field(c, "代理模式", func() {
+						ui.RadioGroup(c, func() {
+							ui.Row(c).Gap(14).Children(func() {
+								for _, mode := range proxyModeOptions {
+									ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
+								}
+							})
 						})
 					})
+					if ui.Button(c.Key("clearsysproxy"), "清空系统代理").Clicked() {
+						g.ProxyMode = proxyModeOff
+						a.clearSystemProxySetting()
+					}
+					a.syncSystemProxy(g)
+				}
+
+				ui.Text(c, "路由预设").Bold()
+				ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
+				ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
+
+				ui.Text(c, "域名解析策略").Bold()
+				// Presented as a switch rather than xray's technical terms:
+				// on resolves domains the domain rules missed and routes by IP
+				// (IPIfNonMatch); off keeps their names as they are (AsIs).
+				resolveOther := g.DomainStrategy == dsIPIfNonMatch
+				ui.Checkbox(c, &resolveOther, "解析列表外的域名，并根据 IP 进一步路由")
+				// Leave an empty (older config) value alone: it already means
+				// AsIs, and rewriting it would restart the core for nothing.
+				switch {
+				case resolveOther && g.DomainStrategy != dsIPIfNonMatch:
+					g.DomainStrategy = dsIPIfNonMatch
+				case !resolveOther && g.DomainStrategy == dsIPIfNonMatch:
+					g.DomainStrategy = dsAsIs
+				}
+
+				ui.Column(c).Gap(8).Disabled(!resolveOther).Children(func() {
+					ui.Text(c, "DNS").Bold()
+					renderChoiceLabels(c, "DNS 服务器", &g.DNSPreset, dnsPresetValues, dnsPresetLabels)
+					if g.DNSPreset == dnsPresetCustom {
+						ui.Field(c, "自定义 DNS（逗号或空格分隔，支持 IP 与 DoH URL）", func() {
+							ui.TextInput(c, &g.DNSCustom).Placeholder("223.5.5.5, https://dns.alidns.com/dns-query")
+						})
+					}
+					ui.Text(c, "这里的 DNS 只为分流判定服务：未命中域名规则的域名先解析出 IP，再查 geoip:cn 决定直连或走代理；翻墙流量的域名始终由远端服务器解析，不经过这里").TextColor(t.TextMuted)
 				})
-				if ui.Button(c.Key("clearsysproxy"), "清空系统代理").Clicked() {
-					g.ProxyMode = proxyModeOff
-					a.clearSystemProxySetting()
-				}
-				a.syncSystemProxy(g)
-			}
-
-			ui.Text(c, "路由预设").Bold()
-			ui.Checkbox(c, &g.RouteCN, "绕过大陆（geosite:cn / geoip:cn 直连）")
-			ui.Checkbox(c, &g.RouteAds, "屏蔽广告（geosite:category-ads-all）")
-
-			ui.Text(c, "域名解析策略").Bold()
-			// Presented as a switch rather than xray's technical terms:
-			// on resolves domains the domain rules missed and routes by IP
-			// (IPIfNonMatch); off keeps their names as they are (AsIs).
-			resolveOther := g.DomainStrategy == dsIPIfNonMatch
-			ui.Checkbox(c, &resolveOther, "解析列表外的域名，并根据 IP 进一步路由")
-			// Leave an empty (older config) value alone: it already means
-			// AsIs, and rewriting it would restart the core for nothing.
-			switch {
-			case resolveOther && g.DomainStrategy != dsIPIfNonMatch:
-				g.DomainStrategy = dsIPIfNonMatch
-			case !resolveOther && g.DomainStrategy == dsIPIfNonMatch:
-				g.DomainStrategy = dsAsIs
-			}
-
-			ui.Column(c).Gap(8).Disabled(!resolveOther).Children(func() {
-				ui.Text(c, "DNS").Bold()
-				renderChoiceLabels(c, "DNS 服务器", &g.DNSPreset, dnsPresetValues, dnsPresetLabels)
-				if g.DNSPreset == dnsPresetCustom {
-					ui.Field(c, "自定义 DNS（逗号或空格分隔，支持 IP 与 DoH URL）", func() {
-						ui.TextInput(c, &g.DNSCustom).Placeholder("223.5.5.5, https://dns.alidns.com/dns-query")
-					})
-				}
-				ui.Text(c, "这里的 DNS 只为分流判定服务：未命中域名规则的域名先解析出 IP，再查 geoip:cn 决定直连或走代理；翻墙流量的域名始终由远端服务器解析，不经过这里").TextColor(t.TextMuted)
+				a.updateTrayTip()
 			})
-			a.updateTrayTip()
 		})
 	})
 }

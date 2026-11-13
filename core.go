@@ -47,7 +47,6 @@ type globalConfig struct {
 	TunName        string  `json:"tunName"`    // the interface name, empty lets xray pick one
 	TunMTU         float64 `json:"tunMtu"`     // the interface MTU, default 1500
 	TunGateway     string  `json:"tunGateway"` // the interface address
-	TunIPv6        bool    `json:"tunIpv6"`    // route the IPv6 traffic as well
 
 	// Runtime-only TUN helper state. The privileged helper owns the TUN
 	// interface, so the in-process core must keep its own connections out
@@ -321,16 +320,21 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 	}
 
 	// Sniffing is always on: without it the domain routing rules
-	// (geosite) have nothing to match on. routeOnly keeps the sniffed
-	// domain for routing alone and never rewrites the destination, and
-	// metadataOnly avoids waiting for the whole handshake, so the
-	// connection keeps its original address and the added delay stays
-	// negligible.
+	// (geosite) have nothing to match on.
+	//
+	// Behind the TUN the destination is only an IP. The system resolver
+	// answered before the traffic got here, and the resolver the ISP
+	// hands out can be poisoned, so the name has to come from the payload
+	// (the ClientHello) and then replace the address: metadataOnly would
+	// never look at it, and routeOnly would keep the poisoned IP. A
+	// client that asks for a domain itself, as a browser using the system
+	// proxy does, already names the destination, so there sniffing only
+	// reads the metadata for routing and the original address stays.
 	sniffing := map[string]any{
 		"enabled":      true,
 		"destOverride": []string{"http", "tls", "quic"},
-		"metadataOnly": true,
-		"routeOnly":    true,
+		"metadataOnly": !helper,
+		"routeOnly":    !helper,
 	}
 
 	inbounds := []any{
@@ -344,9 +348,19 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 	if g.TunEnabled && !helper {
 		inbounds = append(inbounds, tunInbound(g))
 	}
+	// Behind the TUN a domain that reaches here is one sniffing recovered
+	// from the connection, and the only resolver left to ask is the one the
+	// ISP runs, which lies about blocked names: resolving it to pick an IP
+	// rule would route it by that lie, or straight into a blackhole. Keep
+	// the name instead and let the proxy resolve it; IP rules still apply
+	// to destinations that brought no name.
+	strategy := xrayDomainStrategy(g.DomainStrategy)
+	if helper {
+		strategy = "AsIs"
+	}
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": g.LogLevel},
-		"routing":   map[string]any{"domainStrategy": xrayDomainStrategy(g.DomainStrategy), "rules": rules},
+		"routing":   map[string]any{"domainStrategy": strategy, "rules": rules},
 		"outbounds": outbounds,
 		"stats":     map[string]any{},
 		"policy": map[string]any{
