@@ -71,6 +71,7 @@ type app struct {
 	tests          map[string]*testState // per server measurement results
 	lastProxyMode  string                // the mode the system proxy was set to
 	lastProxyAddr  string                // the address it was set to
+	tunProxyOff    bool                  // TUN took over, so the system proxy is paused
 	pac            *pacServer            // the local server that serves the PAC file
 	lastConfig     string                // fingerprint of the config the core runs with
 	restartAt      time.Time             // when to restart the core after a change
@@ -499,6 +500,7 @@ func fmtBytes(n int64) string {
 func (a *app) view(c *ui.Context) {
 	t := c.Theme()
 	running := a.core.Running()
+	a.syncProxyForTun(&a.cfg.Global)
 	a.watchConfig()
 	a.saver.maybeSave(a.cfg, false)
 	a.showConfigAlert(c)
@@ -643,12 +645,19 @@ func (a *app) globalTab(c *ui.Context) {
 
 			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 				if g.TunEnabled {
+					// The mode stays as the user chose it, so turning TUN
+					// off puts the system proxy back the way it was.
 					ui.Text(c, "系统代理").Bold()
-					ui.Text(c, "TUN 模式接管全部流量，不再修改系统代理").TextColor(t.TextMuted)
-					if g.ProxyMode != proxyModeOff {
-						g.ProxyMode = proxyModeOff
-						a.clearSystemProxySetting()
-					}
+					ui.Text(c, "TUN 模式接管全部流量，系统代理暂停；关闭 TUN 后恢复为「"+proxyModeLabel(g.ProxyMode)+"」").TextColor(t.TextMuted)
+					ui.Field(c, "代理模式", func() {
+						ui.RadioGroup(c, func() {
+							ui.Row(c).Gap(14).Disabled(true).Children(func() {
+								for _, mode := range proxyModeOptions {
+									ui.Radio(c, &g.ProxyMode, mode, proxyModeLabel(mode))
+								}
+							})
+						})
+					})
 				} else {
 					ui.Text(c, "系统代理").Bold()
 					ui.Field(c, "代理模式", func() {

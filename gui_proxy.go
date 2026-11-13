@@ -54,6 +54,21 @@ func (a *app) stopPACServer() {
 	}
 }
 
+// syncProxyForTun pauses the system proxy while TUN takes the traffic,
+// and puts the user's own mode back when TUN stops. The mode itself is
+// never rewritten, so it is what the app returns to.
+func (a *app) syncProxyForTun(g *globalConfig) {
+	if g.TunEnabled == a.tunProxyOff {
+		return
+	}
+	a.tunProxyOff = g.TunEnabled
+	if g.TunEnabled {
+		a.clearSystemProxySetting()
+		return
+	}
+	a.syncSystemProxy(g)
+}
+
 // clearSystemProxySetting removes the proxy settings from the system.
 func (a *app) clearSystemProxySetting() {
 	a.lastProxyMode, a.lastProxyAddr = proxyModeOff, ""
@@ -71,7 +86,7 @@ func (a *app) clearSystemProxySetting() {
 // left as it was when the app quits.
 func (a *app) restoreSystemProxy() {
 	a.stopPACServer()
-	if a.cfg.Global.ProxyMode == proxyModeOff {
+	if a.tunProxyOff || a.cfg.Global.ProxyMode == proxyModeOff {
 		return
 	}
 	_ = applySystemProxy(proxyActionClear, "", "")
