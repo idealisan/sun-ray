@@ -91,6 +91,7 @@ type app struct {
 	policyRowFrom  ui.Handle             // first cell of the row being edited
 	policyRowTo    ui.Handle             // last cell of the row being edited
 	tunWarningText string                // why the TUN interface cannot be created
+	tunFallback    bool                  // TUN was wanted but this run serves the proxy instead
 	testing        bool                  // a measurement run is in progress
 	opMu           sync.Mutex            // serializes start/stop/restart
 	tunMu          sync.Mutex            // protects tunHelper
@@ -151,10 +152,14 @@ func (a *app) syncEnvProxy(g *globalConfig) {
 		a.addLog("[sun-ray] 已清除代理环境变量")
 	}
 } // routingModeLabel names the routing in a few words, for the tray tip.
-func routingModeLabel(g globalConfig) string {
+func (a *app) routingModeLabel() string {
+	g := a.cfg.Global
 	prefix := ""
-	if g.TunEnabled {
+	switch {
+	case a.tunActive():
 		prefix = "TUN·"
+	case g.TunEnabled:
+		prefix = "TUN 未启用·"
 	}
 	switch {
 	case g.RouteCN && g.RouteAds:
@@ -182,7 +187,7 @@ func (a *app) trayTipText() string {
 	if down == "" {
 		down = "—"
 	}
-	return fmt.Sprintf("Sun Ray · %s · ↑%s ↓%s · %s", name, up, down, routingModeLabel(a.cfg.Global))
+	return fmt.Sprintf("Sun Ray · %s · ↑%s ↓%s · %s", name, up, down, a.routingModeLabel())
 }
 
 // updateTrayIcon shows a filled icon while the core runs, and an outlined
@@ -360,49 +365,17 @@ func (a *app) startLocked() {
 
 	g := a.cfg.Global
 	if g.TunEnabled {
-		if msg := tunSupportWarning(); msg != "" {
-			a.addLog("[sun-ray] " + msg)
+		if a.startTunLocked(s, &g) {
 			return
 		}
-		iface, err := defaultRouteInterface()
-		if err != nil {
-			a.addLog("[sun-ray] TUN 模式找不到默认路由的网卡: " + err.Error())
-			return
-		}
-		if h := a.currentTunHelper(); h != nil && !sameTun(h.settings, tunSettingsFor(&g, iface, h.settings.TunName)) {
-			a.stopTunHelper()
-		}
-		g.TunHelper = true
-		g.TunBypassInterface = iface
-
-		cfgJSON, err := s.buildJSON(&g)
-		if err != nil {
-			a.addLog("[sun-ray] " + err.Error())
-			return
-		}
-		if err := a.core.Start(cfgJSON, a.addLog); err != nil {
-			a.addLog("[sun-ray] 启动失败: " + err.Error())
-			a.stopTunHelper()
-			return
-		}
-		if a.currentTunHelper() == nil {
-			a.addLog("[sun-ray] 正在请求管理员权限并启动 TUN 辅助进程…")
-			if _, err := a.startTunHelper(&g, iface); err != nil {
-				_ = a.core.Stop()
-				if err == errElevationCancelled {
-					a.addLog("[sun-ray] 已取消 TUN 权限请求")
-				} else {
-					a.addLog("[sun-ray] TUN 辅助进程启动失败: " + err.Error())
-				}
-				a.updateTrayIcon()
-				return
-			}
-			a.addLog("[sun-ray] TUN 辅助进程已启动")
-		}
-		a.addLog("[sun-ray] 内核已在本进程内启动")
-		a.addLog("[sun-ray] TUN 已接管全部流量")
-		a.updateTrayIcon()
-		return
+		// The rights were refused or the helper did not start. Serve the
+		// proxy the usual way instead of leaving the app stopped with a
+		// setting that looks like it runs.
+		a.addLog("[sun-ray] TUN 未能启用，本次运行改用系统代理")
+		a.tunFallback = true
+		g.TunEnabled = false
+	} else {
+		a.tunFallback = false
 	}
 
 	a.stopTunHelper()
@@ -436,6 +409,56 @@ func (a *app) stop() {
 	}
 }
 
+// startTunLocked starts the core behind the TUN helper. It reports false,
+// having stopped what it started, when the rights are refused or the
+// helper fails, so the caller can serve the proxy instead.
+func (a *app) startTunLocked(s *serverConfig, g *globalConfig) bool {
+	if msg := tunSupportWarning(); msg != "" {
+		a.addLog("[sun-ray] " + msg)
+		return false
+	}
+	iface, err := defaultRouteInterface()
+	if err != nil {
+		a.addLog("[sun-ray] TUN 模式找不到默认路由的网卡: " + err.Error())
+		return false
+	}
+	if h := a.currentTunHelper(); h != nil && !sameTun(h.settings, tunSettingsFor(g, iface, h.settings.TunName)) {
+		a.stopTunHelper()
+	}
+	g.TunHelper = true
+	g.TunBypassInterface = iface
+
+	cfgJSON, err := s.buildJSON(g)
+	if err != nil {
+		a.addLog("[sun-ray] " + err.Error())
+		return false
+	}
+	if err := a.core.Start(cfgJSON, a.addLog); err != nil {
+		a.addLog("[sun-ray] 启动失败: " + err.Error())
+		a.stopTunHelper()
+		return false
+	}
+	if a.currentTunHelper() == nil {
+		a.addLog("[sun-ray] 正在请求管理员权限并启动 TUN 辅助进程…")
+		if _, err := a.startTunHelper(g, iface); err != nil {
+			_ = a.core.Stop()
+			a.stopTunHelper()
+			if err == errElevationCancelled {
+				a.addLog("[sun-ray] 已取消 TUN 权限请求")
+			} else {
+				a.addLog("[sun-ray] TUN 辅助进程启动失败: " + err.Error())
+			}
+			return false
+		}
+		a.addLog("[sun-ray] TUN 辅助进程已启动")
+	}
+	a.tunFallback = false
+	a.addLog("[sun-ray] 内核已在本进程内启动")
+	a.addLog("[sun-ray] TUN 已接管全部流量")
+	a.updateTrayIcon()
+	return true
+}
+
 func (a *app) stopLocked() {
 	defer a.updateTrayMenu()
 	a.saver.maybeSave(a.cfg, true)
@@ -445,6 +468,13 @@ func (a *app) stopLocked() {
 	a.stopTunHelper()
 	a.addLog("[sun-ray] 内核已停止")
 	a.updateTrayIcon()
+}
+
+// tunActive reports whether TUN is in charge this run: enabled in the
+// settings and started. After a refused authorization it is not, and the
+// system proxy serves instead.
+func (a *app) tunActive() bool {
+	return a.cfg.Global.TunEnabled && !a.tunFallback
 }
 
 // currentTunHelper returns the running helper, if any.
@@ -530,6 +560,9 @@ func (a *app) view(c *ui.Context) {
 			if running {
 				ui.Textf(c, "↑ %s  ↓ %s", a.upSpeed, a.downSpeed).TextColor(t.TextMuted)
 				ui.Text(c, "运行中").Bold().TextColor(t.Accent)
+				if a.cfg.Global.TunEnabled && a.tunFallback {
+					ui.Text(c, "TUN 未启用").TextColor(t.Danger)
+				}
 				if ui.Button(c.Key("stop"), "停止").Clicked() {
 					a.stop()
 				}
@@ -661,7 +694,11 @@ func (a *app) globalTab(c *ui.Context) {
 				ui.Text(c, "TUN 模式").Bold()
 				ui.Checkbox(c, &g.TunEnabled, "启用 TUN（接管全部流量，启动时请求管理员权限）")
 				if g.TunEnabled {
-					ui.Text(c, "建议关闭「解析列表外的域名，并根据 IP 进一步路由」这个域名解析策略：本地 DNS 可能被污染，按解析结果分流会误判；DNS 干净的话可以打开。").TextColor(t.TextMuted)
+					if a.tunFallback {
+						ui.Text(c, "TUN 未能启动（授权被取消或辅助进程失败），本次运行改用系统代理").TextColor(t.Danger)
+					} else {
+						ui.Text(c, "建议关闭「解析列表外的域名，并根据 IP 进一步路由」这个域名解析策略：本地 DNS 可能被污染，按解析结果分流会误判；DNS 干净的话可以打开。").TextColor(t.TextMuted)
+					}
 					ui.Field(c, "接口名", func() {
 						ui.TextInput(c, &g.TunName).Placeholder(tunNameHint())
 					})
@@ -681,7 +718,7 @@ func (a *app) globalTab(c *ui.Context) {
 			})
 
 			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
-				if g.TunEnabled {
+				if a.tunActive() {
 					// The mode stays as the user chose it, so turning TUN
 					// off puts the system proxy back the way it was.
 					ui.Text(c, "系统代理").Bold()

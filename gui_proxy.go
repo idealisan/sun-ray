@@ -68,7 +68,7 @@ func (a *app) pacServerFailed(err error) {
 // a return to the app — never by a timer.
 func (a *app) ensureSystemProxy(reason string) {
 	g := &a.cfg.Global
-	if g.TunEnabled || g.ProxyMode == proxyModeOff {
+	if a.tunActive() || g.ProxyMode == proxyModeOff {
 		return
 	}
 	if a.systemProxyIsCurrent(g) {
@@ -81,7 +81,7 @@ func (a *app) ensureSystemProxy(reason string) {
 // already did, for an event that says the system lost it.
 func (a *app) reapplySystemProxy(reason string) {
 	g := &a.cfg.Global
-	if g.TunEnabled || g.ProxyMode == proxyModeOff {
+	if a.tunActive() || g.ProxyMode == proxyModeOff {
 		return
 	}
 	a.lastProxyMode, a.lastProxyAddr = "", ""
@@ -118,11 +118,12 @@ func (a *app) stopPACServer() {
 // and puts the user's own mode back when TUN stops. The mode itself is
 // never rewritten, so it is what the app returns to.
 func (a *app) syncProxyForTun(g *globalConfig) {
-	if g.TunEnabled == a.tunProxyOff {
+	active := g.TunEnabled && !a.tunFallback
+	if active == a.tunProxyOff {
 		return
 	}
-	a.tunProxyOff = g.TunEnabled
-	if g.TunEnabled {
+	a.tunProxyOff = active
+	if active {
 		a.clearSystemProxySetting()
 		return
 	}

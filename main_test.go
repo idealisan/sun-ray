@@ -506,6 +506,22 @@ func TestBuildJSONDomainStrategy(t *testing.T) {
 	}
 }
 
+// When TUN could not start, the app serves the proxy instead and says so,
+// rather than looking like TUN is in charge.
+func TestTunFallbackShowsTheProxy(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.cfg.Global.TunEnabled = true
+	a.tunFallback = true
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if !tt.HasText("TUN 未能启动") {
+		t.Error("the settings do not say TUN failed")
+	}
+	if !tt.HasText("代理模式") {
+		t.Error("the system proxy controls are missing after the fallback")
+	}
+}
+
 // TUN recommends leaving the DNS-based routing off, and says why under the
 // switch that turns it on.
 func TestGlobalTabTunDomainStrategyNote(t *testing.T) {
