@@ -518,7 +518,7 @@ func (a *app) view(c *ui.Context) {
 	a.showConfigAlert(c)
 	a.showSaveFailed(c)
 
-	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
+	ui.Column(c).Fill().Padding(12, 12).Gap(10).Children(func() {
 		// Header: title, active server, live speeds, status, start/stop.
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Sun Ray").FontSize(18).Bold()
@@ -620,13 +620,24 @@ func (a *app) pointerOverToolbar(c *ui.Context, x, y float32) bool {
 	return r.W > 0 && r.H > 0 && x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
 }
 
+// scrollGutter is the room a scroll container's bar takes at its right,
+// plus a little air, so its content does not run under the bar.
+func scrollGutter(t *ui.Theme) float32 {
+	width := t.ScrollbarWidth
+	if width <= 0 {
+		width = 6
+	}
+	return width + 6
+}
+
 // globalTab: inbound ports, sniffing, log level and routing presets.
 func (a *app) globalTab(c *ui.Context) {
 	g := &a.cfg.Global
 	t := c.Theme()
 	// One scrollbar for the whole page, the two columns included: the TUN
-	// settings below can make it taller than the window.
-	ui.Scroll(c).Grow(1).Children(func() {
+	// settings below can make it taller than the window. The right padding
+	// keeps the dropdowns out from under the bar.
+	ui.Scroll(c).Grow(1).Padding(0, scrollGutter(t), 0, 0).Children(func() {
 		ui.Row(c).Grow(1).Gap(24).AlignItems(ui.Stretch).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
 				ui.Text(c, "入站（本机代理）").Bold()
@@ -1400,7 +1411,7 @@ func (a *app) subscriptionForm(c *ui.Context, s *subscriptionConfig) {
 func (a *app) subscriptionEditorView(c *ui.Context, win *mygo.Window, s *subscriptionConfig, id string) {
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
 		ui.Text(c, "订阅设置").FontSize(16).Bold()
-		ui.Scroll(c).Grow(1).Children(func() {
+		ui.Scroll(c).Grow(1).Padding(0, scrollGutter(c.Theme()), 0, 0).Children(func() {
 			a.subscriptionForm(c, s)
 		})
 		ui.Row(c).Gap(8).Children(func() {
@@ -1665,7 +1676,7 @@ func (a *app) serverForm(c *ui.Context, cfg *serverConfig) {
 func (a *app) editorView(c *ui.Context, win *mygo.Window, s *serverConfig, id string) {
 	ui.Column(c).Fill().Padding(12, 16).Gap(10).Children(func() {
 		ui.Text(c, "服务器设置").FontSize(16).Bold()
-		ui.Scroll(c).Grow(1).Children(func() {
+		ui.Scroll(c).Grow(1).Padding(0, scrollGutter(c.Theme()), 0, 0).Children(func() {
 			a.serverForm(c, s)
 		})
 		ui.Row(c).Gap(8).Children(func() {
@@ -1922,7 +1933,7 @@ func (a *app) logTab(c *ui.Context) {
 				mygo.Clipboard.WriteText(strings.Join(a.logs, "\n"))
 			}
 		})
-		ui.Scroll(c).Grow(1).Children(func() {
+		ui.Scroll(c).Grow(1).Padding(0, scrollGutter(t), 0, 0).Children(func() {
 			ui.Text(c, strings.Join(a.logs, "\n")).FontSize(12).TextColor(t.TextMuted).
 				Selectable().
 				ContextMenu(func(m *ui.Menu) {
