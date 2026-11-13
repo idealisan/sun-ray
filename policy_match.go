@@ -100,8 +100,13 @@ func (a *app) matchPolicyDomain(domain string) (policyMatch, error) {
 		return policyMatch{Source: "内置规则（绕过大陆 geosite:cn）", Action: policyActionDirect}, nil
 	}
 	m := policyMatch{Source: "未命中直连规则", Action: policyActionProxy}
-	if !g.TunEnabled {
-		m.Note = "普通模式下，未命中域名的连接会解析成 IP 后再按 geoip:cn 判断；TUN 模式下直接走代理"
+	switch {
+	case g.DomainStrategy != dsIPIfNonMatch:
+		m.Note = "当前不解析域名：未命中域名规则的连接交给代理解析"
+	case g.TunEnabled:
+		m.Note = "已开启解析域名：内核会用本地 DNS 解析后按 geoip:cn 判断，DNS 被污染时结论可能不同"
+	default:
+		m.Note = "普通模式下，未命中域名的连接会解析成 IP 后再按 geoip:cn 判断"
 	}
 	return m, nil
 }

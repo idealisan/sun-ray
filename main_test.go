@@ -491,6 +491,31 @@ func TestBuildJSONDomainStrategy(t *testing.T) {
 	if !strings.Contains(string(data), `"domainStrategy": "AsIs"`) {
 		t.Errorf("empty domainStrategy should fall back to AsIs; got %s", data)
 	}
+
+	// Behind the TUN the strategy is still the user's choice.
+	g.DomainStrategy = "ipifnonmatch"
+	g.TunEnabled = true
+	g.TunHelper = true
+	g.TunBypassInterface = "en0"
+	data, err = c.buildJSON(&g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"domainStrategy": "IPIfNonMatch"`) {
+		t.Errorf("the TUN config ignored the domain strategy; got %s", data)
+	}
+}
+
+// TUN recommends leaving the DNS-based routing off, and says why under the
+// switch that turns it on.
+func TestGlobalTabTunDomainStrategyNote(t *testing.T) {
+	a := &app{cfg: defaultAppConfig(), cursor: -1}
+	a.cfg.Global.TunEnabled = true
+	a.saver.remember(a.cfg)
+	tt := ui.NewTester(a.view, 880, 620)
+	if !tt.HasText("建议保持「解析列表外的域名」关闭") {
+		t.Fatal("the TUN settings do not mention the recommended domain strategy")
+	}
 }
 
 // The test button acts on the chosen servers within the filtered list, and on

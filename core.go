@@ -376,16 +376,13 @@ func (c *serverConfig) buildJSON(g *globalConfig) ([]byte, error) {
 	if g.TunEnabled && !helper {
 		inbounds = append(inbounds, tunInbound(g))
 	}
-	// Behind the TUN a domain that reaches here is one sniffing recovered
-	// from the connection, and the only resolver left to ask is the one the
-	// ISP runs, which lies about blocked names: resolving it to pick an IP
-	// rule would route it by that lie, or straight into a blackhole. Keep
-	// the name instead and let the proxy resolve it; IP rules still apply
-	// to destinations that brought no name.
+	// The routing strategy is the user's, behind the TUN too. There the
+	// domains it would resolve are the ones sniffing recovered, and the
+	// resolver the ISP runs may lie about blocked names, which is why the
+	// settings page recommends leaving it off there; a user whose resolver
+	// is trustworthy can turn it on. IP rules apply to destinations that
+	// brought no name either way.
 	strategy := xrayDomainStrategy(g.DomainStrategy)
-	if helper {
-		strategy = "AsIs"
-	}
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": g.LogLevel},
 		"routing":   map[string]any{"domainStrategy": strategy, "rules": rules},
