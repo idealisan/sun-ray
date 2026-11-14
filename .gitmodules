@@ -1,6 +1,7 @@
 [submodule "mygo"]
 	path = mygo
-	url = https://github.com/egoist/mygo
+	url = https://github.com/idealisan/mygo
+	branch = sun-ray
 [submodule "xray-core"]
 	path = xray-core
 	url = https://github.com/xtls/xray-core

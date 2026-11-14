@@ -56,20 +56,12 @@ macOS 上访问系统临时目录会触发工具软件的权限警告，很烦�
 - 锁文件必须独立于配置文件：保存是 `tmp + rename`，会换 inode，锁在配置本身会失效。
 - 释放靠进程退出（`flock` / `LockFileEx`），不需要也不应该手动删锁文件。
 
-## 子模块补丁
+## 子模块
 
-mygo 的改动在本仓库里以补丁维护（上游 `egoist/mygo` 没有推送权限），CI 在构建前应用它们：
+- `mygo` 来自 fork `https://github.com/idealisan/mygo` 的 `sun-ray` 分支，子模块固定在该分支的一个提交上。三处改动（强制 WARP 软件渲染、退出原因、网络路径变化事件）已经作为提交落在 fork 里，本仓库不再保存 mygo 补丁，CI 也不再 `git apply`；应用代码依赖这些改动，**不要换回上游 `egoist/mygo` 的提交**。要继续改 mygo，就在 fork 的 `sun-ray` 分支上提交，再把子模块指针前移。
+- `xray-core` 仍来自上游，内嵌资源的改动以 `patches/xray-core-embedded-assets.patch` 维护，CI 在构建前应用它。
 
-- `patches/mygo-force-warp.patch`
-- `patches/mygo-quit-reason.patch`（应用代码依赖它，不应用就编译不过）
-- `patches/mygo-network-path-events.patch`（同上，应用代码依赖它）
-
-本地从干净的子模块构建前也要应用：
-
-```bash
-git -C mygo apply --whitespace=nowarn ../patches/mygo-quit-reason.patch
-git -C mygo apply --whitespace=nowarn ../patches/mygo-network-path-events.patch
-```
+从干净的子模块构建：`git submodule update --init --recursive` 即可，mygo 自带改动，无需手工打补丁。
 
 ## 提交与发布
 
