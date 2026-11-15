@@ -95,6 +95,7 @@ jobs:
         run: |
           go build ./...
           go build -tags nogui ./...
+          go build -tags webui ./...
 
       - name: Build
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
@@ -203,6 +204,51 @@ jobs:
           path: dist/sun-ray-nogui-*
           if-no-files-found: error
 
+  # The webui build: the interface served as a web page embedded in the Go
+  # binary. Linux only (amd64/arm64/armv7), same core and config as nogui.
+  # The page and HTTP server exist only in this -tags webui variant.
+  webui:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply embedded-assets patch to xray-core
+        run: git -C xray-core apply --whitespace=nowarn ../patches/xray-core-embedded-assets.patch
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build the webui binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in amd64 arm64 armv7; do
+            goarch=$target
+            goarm=
+            case $target in
+              armv7) goarch=arm; goarm=7 ;;
+            esac
+            CGO_ENABLED=0 GOOS=linux GOARCH=$goarch GOARM=$goarm go build -trimpath -ldflags "-s -w" -tags webui -o "dist/sun-ray-webui-linux-$target" .
+          done
+          ls -l dist
+
+      - name: Check the webui binary
+        run: |
+          ./dist/sun-ray-webui-linux-amd64 -version
+          file dist/sun-ray-webui-linux-armv7 | grep -q "ELF 32-bit.*ARM"
+
+      - name: Upload the webui binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: sun-ray-webui
+          path: dist/sun-ray-webui-*
+          if-no-files-found: error
+
   # The size each part contributes: the UI framework, the core, or both.
   size-report:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
@@ -234,7 +280,7 @@ jobs:
   # a GitHub Release and attach all binaries.
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
-    needs: [build, nogui]
+    needs: [build, nogui, webui]
     runs-on: ubuntu-latest
     permissions:
       contents: write

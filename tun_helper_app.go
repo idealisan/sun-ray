@@ -1,4 +1,4 @@
-//go:build !nogui
+//go:build !nogui && !webui
 
 package main
 

@@ -1,4 +1,4 @@
-//go:build !nogui
+//go:build !nogui && !webui
 
 package main
 
@@ -2175,6 +2175,21 @@ func (a *app) setUpTray() {
 	})
 }
 
+// testModeRequested reports whether -test-mode was passed. It is the
+// project-wide development/test switch: every variant skips its
+// single-instance locks when set, so a development build can run beside
+// the installed app. The GUI parses arguments by hand like configArg,
+// without the flag package.
+func testModeRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "-test-mode", "--test-mode", "-test-mode=true", "--test-mode=true":
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	// The same executable is the privileged helper when the app launches
 	// it with -tun-helper. Handle that before any UI initialization.
@@ -2186,19 +2201,21 @@ func main() {
 	// "go run" and the packaged app all read and write the same
 	// ~/sunray.json and listen on the same ports, so two of them would
 	// overwrite each other. Set the name first: mygo's forwarding socket
-	// is keyed by it.
+	// is keyed by it. -test-mode skips both locks for development.
 	mygo.App.SetName("Sun Ray")
-	if !acquireInstanceLock() {
-		// Another instance is running. Hand it our command line (it shows
-		// its window in response) and leave before touching the config.
+	if !testModeRequested(os.Args[1:]) {
+		if !acquireInstanceLock() {
+			// Another instance is running. Hand it our command line (it shows
+			// its window in response) and leave before touching the config.
+			mygo.App.RequestSingleInstanceLock()
+			return
+		}
+		// Own mygo's socket too, so a later launch can ask us to show the
+		// window. Our fixed lock above is the real arbiter: this one is only
+		// the notification channel, and its key differs between a packaged
+		// app and a development build.
 		mygo.App.RequestSingleInstanceLock()
-		return
 	}
-	// Own mygo's socket too, so a later launch can ask us to show the
-	// window. Our fixed lock above is the real arbiter: this one is only
-	// the notification channel, and its key differs between a packaged
-	// app and a development build.
-	mygo.App.RequestSingleInstanceLock()
 
 	// Let development and debugging runs use a private config file instead
 	// of the user's ~/sunray.json.

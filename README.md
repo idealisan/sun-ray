@@ -165,12 +165,43 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+## Web 界面版（Linux，webui）
+
+`sun-ray-webui-linux-amd64` / `-arm64` / `-armv7` 是第三个分发版：把界面做成一个网页，通过 `go:embed` 内嵌进 Go 二进制，浏览器打开即用。它跑的是同一个 xray-core、读同一份 `sunray.json`，只是把界面换成了网页——适合在没有图形环境、但有浏览器的服务器或局域网里管理代理。
+
+**界面以 GUI 版本为准**：顶部横栏的五个 tab（全局 / 服务器 / 订阅 / 策略 / 日志）、整体布局、字段与规则都与 GUI 版一致，后续 webui 更新也跟随 GUI 版，不另起一套布局。这条作为规则写在 `AGENTS.md`。前端是原生 HTML / JavaScript / CSS，不用任何框架。
+
+```bash
+# 服务器上运行，浏览器打开 http://127.0.0.1:3785
+sun-ray-webui-linux-amd64 -config /etc/sunray.json
+
+# 改监听地址与端口
+sun-ray-webui-linux-amd64 -host 0.0.0.0 -port 8080 -config /etc/sunray.json
+```
+
+- 默认监听 `127.0.0.1:3785`，即**仅 IPv4 回环**；`-host` / `-port` 可手动指定
+- `-config` 指定配置文件，`-version` 打印版本；`-test-mode` 为开发/测试模式，带它跳过单实例锁，方便本机与已运行的 GUI 并存调试
+- 功能与 GUI 对等：五个 tab 的增删改、启停、切当前节点、测速、订阅在线更新、策略测试、分享链接导入导出、日志
+- TUN 辅助进程、系统代理、环境变量、托盘这些图形机专属的运行时动作在 webui 不执行（字段仍可编辑，标注「仅 GUI 生效」），与无界面版一致
+- **安全提示**：`/api/state` 会返回服务器密钥、订阅地址里的 token 等敏感字段，且接口不加认证。默认只听回环因此仅本机可访问；一旦用 `-host 0.0.0.0` 暴露到网络，同网段的任何进程都能读取这些凭据并控制启停，请只在可信网络下这样做，或配合防火墙/反向代理加认证
+
+虽是 Linux 专用分发版，但纯 Go 实现可以直接在 macOS 本机编译运行，方便查看效果：
+
+```bash
+go build -tags webui -o TMP/sun-ray-webui .
+cp ~/sunray.json TMP/sunray-dev.json            # 开发调试用副本，不碰真实配置
+TMP/sun-ray-webui -test-mode -config TMP/sunray-dev.json -port 3785
+# 浏览器打开 http://127.0.0.1:3785
+```
+
+三个构建变体靠 build tag 隔离：GUI `!nogui && !webui`、命令行 `nogui`、webui `webui`。网页服务、内嵌页面与前端代码只存在于 webui 变体，GUI 与命令行版的二进制不因此增加任何体积。
+
 ## CI 与发布
 
 GitHub Actions（`.github/workflows/build.yml`）：
 
-- push 到 master / PR：三平台（Linux amd64 / Windows amd64 / macOS arm64）编译 + Linux 上跑测试，产物存为 workflow artifact
-- 推送 `v*` 标签：三平台编译后自动创建 GitHub Release，并把二进制挂到 Release 资产上
+- push 到 master / PR：GUI、命令行、webui 三种构建都编译一遍 + Linux 上跑测试，产物存为 workflow artifact
+- 推送 `v*` 标签：编译后自动创建 GitHub Release，每个 release 挂三类制品——GUI 版（macOS `.dmg`/`.zip`、Windows `.exe`、Linux 二进制）、命令行版（Linux amd64/arm64/armv7）、Web 界面版（Linux amd64/arm64/armv7）
 - 每周二定时刷新内嵌 geo 数据，提交后打带日期的标签并自动走正式 Release（见「每周自动更新 geo 数据」）
 
 发布新版：
@@ -232,13 +263,15 @@ git push origin v0.1.0
 
 ### 单实例
 
-**全局只允许运行一个 Sun Ray**：GUI、无界面版、打包的 `.app` 和开发时的 `go run .` 共用同一把锁，因为读写同一份 `~/sunray.json`、抢同一批端口，两个实例会互相覆盖状态。
+**全局只允许运行一个 Sun Ray**：GUI、无界面版、Web 界面版、打包的 `.app` 和开发时的 `go run .` 共用同一把锁，因为读写同一份 `~/sunray.json`、抢同一批端口，两个实例会互相覆盖状态。生产上同一份配置 + 端口应只跑一个会启动内核的变体。
 
 锁是系统临时目录里的 `sunray-<用户 ID>.lock`——锁只在实例运行时有意义，所以不放到任何持久化的位置，不留给用户去手动清理。macOS / Linux 用 `flock`，Windows 用 `LockFileEx`，进程崩溃或退出都由系统自动释放。
 
 锁单独成文件而不是锁配置文件本身，是因为保存配置采用"临时文件 + rename"的原子替换：rename 会换掉 inode，锁就落在已被移走的旧文件上，第二个实例可以立刻锁住新文件，锁形同虚设。
 
 第二次启动不会打开新窗口，而是让已运行的实例把主窗口显示出来，然后自己退出。`-test`、`-test-mode`（集成测试）和 `-version` 这类一次性命令不参与加锁，否则并行的集成测试会互相锁死。
+
+`-test-mode` 是全项目统一的开发/测试开关：GUI、命令行、webui 任一变体带它都跳过单实例锁，这样开发构建能与已安装的 GUI 并存调试（webui 本机看效果就用它）。webui 平时照常加锁。
 
 ## Roadmap
 

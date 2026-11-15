@@ -63,6 +63,22 @@ macOS 上访问系统临时目录会触发工具软件的权限警告，很烦�
 
 从干净的子模块构建：`git submodule update --init --recursive` 即可，mygo 自带改动，无需手工打补丁。
 
+## Web UI 变体（webui）
+
+**界面以 GUI 版本为准（the GUI is authoritative）**：webui 的顶部横栏 tab、五个 tab（全局 / 服务器 / 订阅 / 策略 / 日志）、整体布局、字段与规则一律以 GUI（`main.go` 的 `view()` 及各 tab 函数）为准。后续 webui 的版本更新必须跟随 GUI，不得自行新增 tab 或改动布局。协议表单字段通过 `/api/meta` 从 GUI 的 `protocolRegistry`/`fieldSpec` 反射导出，选项常量直接引用 ungated 的定义，就是为了不产生与 GUI 漂移的第二份标签清单。
+
+三个互斥的构建变体，靠 build tag 隔离，每个 release 各发一份制品：
+
+- **GUI**：`//go:build !nogui && !webui`，`main.go`，三平台打包。
+- **命令行 / 无界面**：`//go:build nogui`，`nogui_main.go`，Linux amd64/arm64/armv7。
+- **webui**：`//go:build webui`，`webui_main.go` + `webui_controller.go` + `webui/index.html`（`go:embed`），Linux amd64/arm64/armv7，默认监听 `127.0.0.1:3785`，`-host`/`-port` 可改。
+
+**零开销**：网页服务、`embed` 页面、web controller、前端代码只在 `//go:build webui` 文件里。GUI/CLI 编译单元不含任何网页代码；CLI 逐字节不变，GUI 也不引入网页内容。订阅解析与策略匹配的纯逻辑抽到 `//go:build !nogui || webui` 的 `subscription_shared.go` / `policy_shared.go`，由 GUI 与 webui 共用一份（CLI 不编译），这样「以 GUI 为准」在业务逻辑层也有保证。改这些纯逻辑时，GUI 与 webui 会同步生效。
+
+`-test-mode` 是**全项目统一的开发/测试开关**：任何变体带它就跳过单实例锁，以便开发构建与已安装的 GUI 并存。webui 平时也加锁；本机调试用 `go run -tags webui . -test-mode -config TMP/...`。
+
+webui 的开发/调试/测试同样遵守本文件的硬规则：**绝不读写 `~/sunray.json`**，一律 `-config` 指向 `TMP/` 里的副本，临时文件放 `TMP/`，前后各取一次 `shasum ~/sunray.json`。前端是原生 HTML/JS/CSS，不用任何框架。
+
 ## 提交与发布
 
 - 提交信息参考最近 10 条的风格（`feat:` / `fix:` / `chore:` / `docs:`），不要 `Co-authored-by` trailer。
