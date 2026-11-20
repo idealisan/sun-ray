@@ -249,6 +249,62 @@ jobs:
           path: dist/sun-ray-webui-*
           if-no-files-found: error
 
+  # Self-contained systemd installers for Debian / Ubuntu. One script per
+  # variant, each embedding all three Linux binaries and picking the right
+  # one at run time via uname -m.
+  systemd-installer:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    needs: [nogui, webui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sun-ray-nogui
+          path: binaries
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sun-ray-webui
+          path: binaries
+
+      - name: Read the version
+        id: version
+        run: |
+          echo "value=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' mygo.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the installers
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for variant in nogui webui; do
+            python3 scripts/make_systemd_installer.py \
+              --variant "$variant" \
+              --version "${{ steps.version.outputs.value }}" \
+              --amd64 "binaries/sun-ray-$variant-linux-amd64" \
+              --arm64 "binaries/sun-ray-$variant-linux-arm64" \
+              --armv7 "binaries/sun-ray-$variant-linux-armv7" \
+              --template scripts/systemd-installer.sh.template \
+              --output "dist/sun-ray-systemd-debian-ubuntu-$variant.sh"
+          done
+          ls -lh dist
+
+      - name: Check the installers
+        run: |
+          set -euo pipefail
+          sh -n dist/sun-ray-systemd-debian-ubuntu-*.sh
+          ! grep -q '__B64_' dist/sun-ray-systemd-debian-ubuntu-*.sh
+          ./dist/sun-ray-systemd-debian-ubuntu-nogui.sh --help >/dev/null
+          ./dist/sun-ray-systemd-debian-ubuntu-webui.sh --help >/dev/null
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: sun-ray-systemd-installers
+          path: dist/sun-ray-systemd-debian-ubuntu-*.sh
+          if-no-files-found: error
+
   # The size each part contributes: the UI framework, the core, or both.
   size-report:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
@@ -280,7 +336,7 @@ jobs:
   # a GitHub Release and attach all binaries.
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
-    needs: [build, nogui, webui]
+    needs: [build, nogui, webui, systemd-installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write

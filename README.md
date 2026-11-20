@@ -196,12 +196,39 @@ TMP/sun-ray-webui -test-mode -config TMP/sunray-dev.json -port 3785
 
 三个构建变体靠 build tag 隔离：GUI `!nogui && !webui`、命令行 `nogui`、webui `webui`。网页服务、内嵌页面与前端代码只存在于 webui 变体，GUI 与命令行版的二进制不因此增加任何体积。
 
+## Debian / Ubuntu 一键安装（systemd）
+
+Release 附带两个**自包含**的 shell 脚本，适用于 Debian、Ubuntu 及其他基于 systemd 的发行版：
+
+- `sun-ray-systemd-debian-ubuntu-nogui.sh` —— 安装无界面版
+- `sun-ray-systemd-debian-ubuntu-webui.sh` —— 安装 Web 界面版（管理页面 `http://127.0.0.1:3785`）
+
+Debian 与 Ubuntu 的文件布局一致，所以两者共用一个脚本；脚本内嵌了 amd64 / arm64 / armv7 三个架构的二进制（gzip + base64），运行时用 `uname -m` 自动挑出对应的一个，不需要另外下载架构包。
+
+```bash
+sudo ./sun-ray-systemd-debian-ubuntu-nogui.sh          # 按提示输入 y 确认安装
+sudo ./sun-ray-systemd-debian-ubuntu-webui.sh --uninstall  # 卸载（会删除配置）
+```
+
+安装内容：
+
+| 项目 | 位置 |
+| --- | --- |
+| 二进制 | `/usr/local/bin/sun-ray` |
+| systemd 单元 | `/etc/systemd/system/sun-ray.service` |
+| 配置文件 | `/etc/sun-ray/sunray.json`（已存在则保留） |
+| 运行用户 | 系统用户 `sunray`（不可登录） |
+
+装完自动 `daemon-reload && enable && restart`；状态与日志用 `systemctl status sun-ray`、`journalctl -u sun-ray -f` 查看。首次安装会写一份「直连（freedom）」的默认配置，服务能起来但不会代理任何境外地址——请在 webui 里改成自己的服务器，或直接编辑该 JSON（格式与 `~/sunray.json` 完全一致，可从 GUI 机器拷过来）。
+
+TUN 模式需要额外的 `CAP_NET_ADMIN` 与 `/dev/net/tun`，默认单元没有放开；服务器上建议只用普通 SOCKS/HTTP 入站。
+
 ## CI 与发布
 
 GitHub Actions（`.github/workflows/build.yml`）：
 
 - push 到 master / PR：GUI、命令行、webui 三种构建都编译一遍 + Linux 上跑测试，产物存为 workflow artifact
-- 推送 `v*` 标签：编译后自动创建 GitHub Release，每个 release 挂三类制品——GUI 版（macOS `.dmg`/`.zip`、Windows `.exe`、Linux 二进制）、命令行版（Linux amd64/arm64/armv7）、Web 界面版（Linux amd64/arm64/armv7）
+- 推送 `v*` 标签：编译后自动创建 GitHub Release，每个 release 挂四类制品——GUI 版（macOS `.dmg`/`.zip`、Windows `.exe`、Linux 二进制）、命令行版（Linux amd64/arm64/armv7）、Web 界面版（Linux amd64/arm64/armv7）、Debian/Ubuntu systemd 自包含安装脚本（nogui / webui 各一个，内嵌三种架构）
 - 每周二定时刷新内嵌 geo 数据，提交后打带日期的标签并自动走正式 Release（见「每周自动更新 geo 数据」）
 
 发布新版：
