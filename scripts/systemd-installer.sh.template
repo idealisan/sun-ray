@@ -29,7 +29,14 @@ say() { printf '%s\n' "$*"; }
 die() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
 tmpdir=
-cleanup() { [ -n "$tmpdir" ] && rm -rf "$tmpdir"; }
+cleanup() {
+    # Always succeed: in POSIX shells the EXIT trap's status becomes the
+    # script's exit status, so a bare test here would turn success into 1.
+    if [ -n "$tmpdir" ]; then
+        rm -rf "$tmpdir"
+    fi
+    return 0
+}
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
