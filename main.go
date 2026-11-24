@@ -520,6 +520,7 @@ func (a *app) pollTraffic() {
 		a.win.Update(func() {
 			a.upSpeed = fmtBytes(upRate) + "/s"
 			a.downSpeed = fmtBytes(downRate) + "/s"
+			touchBarSetSpeeds(a.upSpeed, a.downSpeed)
 			a.updateTrayTip()
 		})
 	}
@@ -679,7 +680,8 @@ func (a *app) globalTab(c *ui.Context) {
 				})
 				ui.Checkbox(c, &g.AllowLAN, "允许局域网连接")
 				ui.Checkbox(c, &g.AutoStart, "启动后自动运行代理")
-				ui.Checkbox(c, &g.EnvProxy, "设置代理环境变量（终端可用）").Disabled(runtime.GOOS != "windows")
+				touchBarCheckbox(c, g)
+				envProxyCheckbox(c, g)
 				if ui.Button(c.Key("copyenvcmd"), "复制环境变量命令").Clicked() && a.win != nil {
 					addr := "127.0.0.1:" + g.ListenPort
 					mygo.Clipboard.WriteText(envProxyCommands(addr))
@@ -2270,6 +2272,7 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(a.onQuitRequested)
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		touchBarShutdown()
 		a.saver.maybeSave(a.cfg, true)
 		_ = a.core.Stop()
 		a.stopTunHelper()
@@ -2317,6 +2320,7 @@ func main() {
 			a.win.Hide()
 		})
 		a.setUpTray()
+		touchBarSetEnabled(a.cfg.Global.TouchBar)
 		go a.pollTraffic()
 		if a.cfg.Global.AutoStart {
 			a.start()

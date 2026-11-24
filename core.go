@@ -35,6 +35,7 @@ type globalConfig struct {
 	AutoStart  bool   `json:"autoStart"`  // start the core when the app starts
 	EnvProxy   bool   `json:"envProxy"`   // set the proxy environment variables for the user
 	SoftRender bool   `json:"softRender"` // draw with the software rasterizer, which uses less memory
+	TouchBar   bool   `json:"touchBar"`   // macOS: pin live speeds to the Touch Bar Control Strip
 	RouteCN    bool   `json:"routeCN"`    // direct traffic to mainland China sites/IPs
 	RouteAds   bool   `json:"routeAds"`   // block ad domains
 
@@ -157,7 +158,7 @@ func xrayDomainStrategy(key string) string {
 func defaultGlobalConfig() globalConfig {
 	return globalConfig{
 		ListenPort: "10808", LogLevel: "info", RouteCN: true, SoftRender: true,
-		DNSPreset: dnsPresetSystem, TunMTU: defaultTunMTU,
+		TouchBar: true, DNSPreset: dnsPresetSystem, TunMTU: defaultTunMTU,
 		DomainStrategy: dsAsIs,
 	}
 }

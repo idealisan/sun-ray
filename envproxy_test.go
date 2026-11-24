@@ -3,31 +3,24 @@
 package main
 
 import (
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// The copy button is always available, while the checkbox only works on
-// Windows: on macOS and Linux it is disabled.
+// The copy button is always available; the checkbox is Windows-only, where
+// the app can actually set the user's shell environment.
 func TestEnvProxyUI(t *testing.T) {
 	a := &app{cfg: defaultAppConfig(), cursor: -1}
 	a.saver.remember(a.cfg)
 	tt := ui.NewTester(a.view, 880, 620)
-	for _, want := range []string{"设置代理环境变量（终端可用）", "复制环境变量命令"} {
-		if !tt.HasText(want) {
-			t.Errorf("missing %q; texts: %v", want, tt.Texts())
-		}
+	if !tt.HasText("复制环境变量命令") {
+		t.Errorf("missing copy button; texts: %v", tt.Texts())
 	}
-	if runtime.GOOS != "windows" {
-		before := a.cfg.Global.EnvProxy
-		if err := tt.Click("设置代理环境变量（终端可用）"); err == nil {
-			if a.cfg.Global.EnvProxy != before {
-				t.Error("the disabled checkbox should not change the setting")
-			}
-		}
+	const checkbox = "设置代理环境变量（终端可用）"
+	if tt.HasText(checkbox) {
+		t.Errorf("the env proxy checkbox should be hidden off Windows; texts: %v", tt.Texts())
 	}
 	// The button itself is clickable; the clipboard is only written when a
 	// real window exists, which the headless tester does not provide.
