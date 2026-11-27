@@ -30,6 +30,10 @@ jobs:
             name: windows-amd64
           - os: macos-latest
             name: darwin-arm64
+          # Go/MyGo need no cgo, so the arm64 macOS runner can cross-compile
+          # an Intel app and still produce a signed .app/.dmg (which do need macOS).
+          - os: macos-latest
+            name: darwin-amd64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -92,6 +96,9 @@ jobs:
       # two pushes of a release do not do the same work twice.
       - name: Compile
         if: ${{ !(startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
+        env:
+          # Check the Intel cross-build on branch pushes too.
+          GOARCH: ${{ matrix.name == 'darwin-amd64' && 'amd64' || '' }}
         run: |
           go build ./...
           go build -tags nogui ./...
@@ -102,11 +109,15 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
             # mygo build makes a signed .app (and a .dmg) with the icon and
-            # Info.plist, so users can double-click it.
-            go run github.com/egoist/mygo/cmd/mygo build -platform darwin/arm64 -o dist
-            ditto -c -k --keepParent "dist/darwin-arm64/Sun Ray.app" "sun-ray-darwin-arm64.zip"
-            # the disk image goes next to it, in the working directory
-            for dmg in dist/darwin-arm64/*.dmg; do
+            # Info.plist, so users can double-click it. MyGo needs no cgo,
+            # so darwin/amd64 can be cross-compiled on the arm64 runner;
+            # signing and disk images still require macOS.
+            PLATFORM_NAME="${{ matrix.name }}"   # darwin-arm64 or darwin-amd64
+            GOARCH="${PLATFORM_NAME#darwin-}"
+            go run github.com/egoist/mygo/cmd/mygo build -platform "darwin/$GOARCH" -o dist
+            ditto -c -k --keepParent "dist/$PLATFORM_NAME/Sun Ray.app" "sun-ray-$PLATFORM_NAME.zip"
+            # the disk image goes next to it, in the platform directory
+            for dmg in "dist/$PLATFORM_NAME"/*.dmg; do
               [ -e "$dmg" ] && cp "$dmg" .
             done
           else
