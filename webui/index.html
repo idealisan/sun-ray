@@ -236,7 +236,8 @@ let state = null;      // latest /api/state
 let meta = null;       // /api/meta (built once)
 let tab = "global";
 let editor = null;     // {kind, ...draft} — an open inline editor; pauses table redraw
-let prev = {up:0, down:0, t:0};
+const speedWindow = 3;   // seconds of traffic averaged into the shown rate
+let traffic = [];        // recent cumulative counters, newest last
 
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -298,13 +299,18 @@ function renderHeader(){
   const g = state.config.global || {};
   const cur = state.config.servers.find(s=>s.id===state.activeId) || null;
   $("#cur").textContent = "当前：" + (cur? displayName(cur) : "未选择服务器");
+  // Keep the current snapshot plus the last three seconds of them; the rate
+  // is the change across that whole span, so it still refreshes every second.
   const now = Date.now();
-  const dt = (now - prev.t)/1000;
-  if (prev.t && dt>0){
-    const up = Math.max(0,(state.up-prev.up)/dt), down = Math.max(0,(state.down-prev.down)/dt);
-    $("#speed").textContent = "↑ "+fmtBytes(up)+"/s  ↓ "+fmtBytes(down)+"/s";
+  traffic.push({up:state.up, down:state.down, t:now});
+  if (traffic.length > speedWindow+1) traffic.shift();
+  if (traffic.length > 1){
+    const first = traffic[0], span = (now-first.t)/1000;
+    if (span > 0){
+      const up = Math.max(0,(state.up-first.up)/span), down = Math.max(0,(state.down-first.down)/span);
+      $("#speed").textContent = "↑ "+fmtBytes(up)+"/s  ↓ "+fmtBytes(down)+"/s";
+    }
   }
-  prev = {up:state.up, down:state.down, t:now};
   const st=$("#status"), tg=$("#toggle");
   if (state.running){ st.textContent="运行中"; st.className="badge on"; tg.textContent="停止"; tg.classList.remove("primary"); }
   else { st.textContent="已停止"; st.className="badge off"; tg.textContent="启动"; tg.classList.add("primary"); }

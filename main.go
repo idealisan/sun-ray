@@ -509,14 +509,55 @@ func (a *app) stopTunHelper() {
 	}
 }
 
-// pollTraffic samples the stats counters once a second from a goroutine,
-// publishing speeds back through Window.Update.
+// liveSpeedWindow is the number of one-second samples behind each displayed
+// rate. The header still refreshes once a second; averaging three samples
+// keeps a single burst from swinging the number wildly.
+const liveSpeedWindow = 3
+
+// speedWindow smooths cumulative byte counters into a per-second rate. Every
+// sample is the traffic since the previous tick, and the rate is the mean of
+// the most recent liveSpeedWindow samples.
+type speedWindow struct {
+	prev    int64
+	started bool
+	samples [liveSpeedWindow]int64
+	count   int
+	next    int
+}
+
+// sample records a tick's cumulative total and returns the average bytes per
+// second over the window. The first tick only establishes the baseline.
+func (w *speedWindow) sample(total int64) int64 {
+	if !w.started {
+		w.started = true
+		w.prev = total
+		return 0
+	}
+	delta := total - w.prev
+	if delta < 0 {
+		// Counters restart from zero when the core is recreated.
+		delta = 0
+	}
+	w.prev = total
+	w.samples[w.next] = delta
+	w.next = (w.next + 1) % len(w.samples)
+	if w.count < len(w.samples) {
+		w.count++
+	}
+	var sum int64
+	for _, v := range w.samples[:w.count] {
+		sum += v
+	}
+	return sum / int64(w.count)
+}
+
+// pollTraffic samples the stats counters once a second from a goroutine and
+// publishes the three-second average rates through Window.Update.
 func (a *app) pollTraffic() {
-	var prevUp, prevDown int64
+	var up, down speedWindow
 	for range time.Tick(time.Second) {
-		up, down := a.core.Traffic()
-		upRate, downRate := up-prevUp, down-prevDown
-		prevUp, prevDown = up, down
+		totalUp, totalDown := a.core.Traffic()
+		upRate, downRate := up.sample(totalUp), down.sample(totalDown)
 		a.win.Update(func() {
 			a.upSpeed = fmtBytes(upRate) + "/s"
 			a.downSpeed = fmtBytes(downRate) + "/s"
