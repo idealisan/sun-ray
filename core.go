@@ -557,7 +557,18 @@ func (x *xrayCore) Stop() error {
 	return inst.Close()
 }
 
-// Traffic sums the in-process stats counters: total uplink and downlink bytes.
+// internetTrafficCounter reports whether a counter measures the app's own
+// link to the internet. Inbound counters measure the loopback between this
+// app and local clients: every byte there is already counted again on the
+// outbound side, so adding both would double the rate. The loopback-only
+// direct-lo and the blackhole outbound are not internet traffic either.
+func internetTrafficCounter(name string) bool {
+	return strings.HasPrefix(name, "outbound>>>proxy>>>traffic>>>") ||
+		strings.HasPrefix(name, "outbound>>>direct>>>traffic>>>")
+}
+
+// Traffic sums the in-process stats counters: total uplink and downlink bytes
+// exchanged with the internet, through the proxy or a direct outbound.
 func (x *xrayCore) Traffic() (up, down int64) {
 	x.mu.Lock()
 	inst := x.instance
@@ -570,10 +581,13 @@ func (x *xrayCore) Traffic() (up, down int64) {
 		return 0, 0
 	}
 	m.VisitCounters(func(name string, c stats.Counter) bool {
+		if !internetTrafficCounter(name) {
+			return true
+		}
 		switch {
-		case strings.HasSuffix(name, ">>>traffic>>>uplink"):
+		case strings.HasSuffix(name, ">>>uplink"):
 			up += c.Value()
-		case strings.HasSuffix(name, ">>>traffic>>>downlink"):
+		case strings.HasSuffix(name, ">>>downlink"):
 			down += c.Value()
 		}
 		return true

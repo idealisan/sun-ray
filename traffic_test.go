@@ -2,6 +2,30 @@ package main
 
 import "testing"
 
+// Only the app's internet-facing outbounds count. The inbound side is the
+// loopback to local clients and would double every byte; direct-lo and block
+// never reach the internet.
+func TestInternetTrafficCounter(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"inbound>>>mixed-in>>>traffic>>>downlink", false},
+		{"inbound>>>tun>>>traffic>>>uplink", false},
+		{"user>>>someone>>>traffic>>>downlink", false},
+		{"outbound>>>proxy>>>traffic>>>uplink", true},
+		{"outbound>>>proxy>>>traffic>>>downlink", true},
+		{"outbound>>>direct>>>traffic>>>downlink", true},
+		{"outbound>>>direct-lo>>>traffic>>>downlink", false},
+		{"outbound>>>block>>>traffic>>>uplink", false},
+	}
+	for _, c := range cases {
+		if got := internetTrafficCounter(c.name); got != c.want {
+			t.Errorf("internetTrafficCounter(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // The displayed rate must span three ticks, not just the latest one: a short
 // burst stays in the average for three seconds and then drops out. A counter
 // reset (core restart) must not contribute a negative sample.
